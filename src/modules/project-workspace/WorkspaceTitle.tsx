@@ -33,6 +33,10 @@ function getTabTitle(activeTab: AppTab, shouldShowTasksTab: boolean, t: (key: st
     return t('tabs.browser');
   }
 
+  if (activeTab === 'project-tracking') {
+    return t('tabs.projectTracking');
+  }
+
   return t('misc.projectFallback');
 }
 

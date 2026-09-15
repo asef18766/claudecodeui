@@ -227,6 +227,11 @@ export const api = {
   sessionDetails: (sessionId: string) =>
     get(`/api/providers/sessions/${encodeURIComponent(sessionId)}`),
   runningSessions: () => get('/api/providers/sessions/running'),
+  projectTracking: {
+    list: () => get('/api/project-tracking'),
+    add: (sessionId: string) => post(`/api/project-tracking/${encodeURIComponent(sessionId)}`),
+    remove: (sessionId: string) => del(`/api/project-tracking/${encodeURIComponent(sessionId)}`),
+  },
   recentConversations: ({ limit = 40, offset = 0 }: { limit?: number; offset?: number } = {}) =>
     get(`/api/providers/sessions/recent${query({ limit, offset })}`),
   providerSessionId: (sessionId: string) =>

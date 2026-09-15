@@ -34,8 +34,11 @@ function ProjectMainRegion({
     targetSessionId: string,
     options?: SessionNavigationOptions,
   ) => {
+    // Session links from non-chat panes (notably Project Tracking) must reveal
+    // the conversation after the URL-driven project/session selection settles.
+    setActiveTab('chat');
     navigate(`/session/${targetSessionId}`, { replace: Boolean(options?.replace) });
-  }, [navigate]);
+  }, [navigate, setActiveTab]);
 
   const handleSessionEstablished = useCallback((
     targetSessionId: string,

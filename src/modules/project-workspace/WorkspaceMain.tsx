@@ -15,6 +15,7 @@ import { EditorSidebar, useEditorSidebar } from '@/modules/code-editor';
 import WorkspaceHeader from '@/modules/project-workspace/WorkspaceHeader';
 import WorkspaceStateView from '@/modules/project-workspace/WorkspaceStateView';
 import WorkspaceErrorBoundary from '@/modules/project-workspace/WorkspaceErrorBoundary';
+import { ProjectTrackingPanel } from '@/modules/project-tracking';
 
 type WorkspaceMainProps = {
   selectedProject: Project | null;
@@ -199,6 +200,10 @@ function WorkspaceMain({
             <div className="h-full overflow-hidden">
               <BrowserUsePanel isVisible={activeTab === 'browser'} onShowSettings={onShowSettings} />
             </div>
+          )}
+
+          {activeTab === 'project-tracking' && (
+            <ProjectTrackingPanel onNavigateToSession={onNavigateToSession} />
           )}
 
           {activeTab.startsWith('plugin:') && (

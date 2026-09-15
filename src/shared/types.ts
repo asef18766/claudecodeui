@@ -51,7 +51,20 @@ export type ProviderModelActions = {
 //----------------- PROJECTS AND SESSIONS ------------
 
 /** Identifies the workspace pane the user is looking at; plugin panes are namespaced by plugin id. */
-export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'browser' | `plugin:${string}`;
+export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'browser' | 'project-tracking' | `plugin:${string}`;
+
+/** A session pinned to the cross-project run board, including its latest terminal or live status. */
+export type ProjectTrackingItem = {
+  sessionId: string;
+  sessionName: string;
+  projectId: string | null;
+  projectName: string | null;
+  provider: LLMProvider;
+  status: 'running' | 'done' | 'error';
+  errorMessage: string | null;
+  addedAt: string;
+  updatedAt: string;
+};
 
 /** A message queued to be sent to a session at a future time. */
 export type ScheduledMessage = {
