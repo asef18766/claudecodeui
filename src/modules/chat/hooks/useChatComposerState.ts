@@ -44,6 +44,10 @@ type UseChatComposerStateArgs = {
    */
   currentProviderModel: string;
   currentProviderEffort: string;
+  /** When true every send asks the provider to run the turn inside the workspace's Docker sandbox. */
+  sandboxEnabled?: boolean;
+  /** Template image that sandbox is built from; null/undefined = the agent's default image. */
+  sandboxTemplate?: string | null;
   isLoading: boolean;
   processingSessions?: SessionActivityMap;
   canAbortSession: boolean;
@@ -163,6 +167,8 @@ export function useChatComposerState({
   resolvePermissionModeForProvider,
   currentProviderModel,
   currentProviderEffort,
+  sandboxEnabled = false,
+  sandboxTemplate = null,
   isLoading,
   canAbortSession,
   tokenBudget,
@@ -600,6 +606,8 @@ export function useChatComposerState({
       permissionMode: resolvePermissionModeForProvider(provider, permissionMode),
       toolsSettings,
       skipPermissions: toolsSettings?.skipPermissions || false,
+      sandbox: sandboxEnabled,
+      sandboxTemplate: sandboxEnabled ? sandboxTemplate : null,
       sessionSummary: getNotificationSessionSummary(selectedSession, currentInput),
     };
   }, [
@@ -608,6 +616,8 @@ export function useChatComposerState({
     permissionMode,
     provider,
     resolvePermissionModeForProvider,
+    sandboxEnabled,
+    sandboxTemplate,
     selectedSession,
   ]);
 

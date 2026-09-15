@@ -22,6 +22,7 @@ import {
   createNormalizedMessage,
 } from '@/shared/index.js';
 import { notifyRunFailed, notifyRunStopped } from '@/modules/notifications/index.js';
+import { workspaceSandboxService } from '@/modules/sandbox/index.js';
 import type { AnyRecord, ProviderRuntimeContext, ProviderRuntimeWriter } from '@/shared/index.js';
 
 type ActiveCodexSession = {
@@ -303,8 +304,26 @@ async function queryCodex(
   // the provider-native thread id once captured (legacy/direct API callers).
   const sessionKey = () => sessionId || capturedSessionId || null;
 
+  // Docker sandbox mode: the Codex CLI runs inside the workspace's sandbox
+  // through a generated launcher handed to the SDK as `codexPathOverride`.
+  // Prepared inside the try so a missing `sbx` or a failed sandbox start is
+  // reported to the client as an ordinary run error.
+  let sandboxRun: Awaited<ReturnType<typeof workspaceSandboxService.prepareCodexRun>> | null = null;
+
   try {
-    codex = new Codex();
+    if (options.sandbox === true) {
+      sandboxRun = await workspaceSandboxService.prepareCodexRun({
+        cwd: workingDirectory,
+        providerSessionId,
+        template: typeof options.sandboxTemplate === 'string' && options.sandboxTemplate ? options.sandboxTemplate : null,
+        // Codex reads image and file attachments by path, so they must exist
+        // at the same path inside the sandbox.
+        attachmentPaths: [...(Array.isArray(images) ? images : []), ...(Array.isArray(files) ? files : [])]
+          .map((descriptor: AnyRecord) => descriptor?.path)
+          .filter((attachmentPath): attachmentPath is string => typeof attachmentPath === 'string'),
+      });
+    }
+    codex = new Codex(sandboxRun ? { codexPathOverride: sandboxRun.codexExecutablePath } : undefined);
 
     const threadOptions: ThreadOptions = {
       workingDirectory,
@@ -488,6 +507,17 @@ async function queryCodex(
       const session = activeCodexSessions.get(sessionKey() || '');
       if (session) {
         session.status = session.status === 'aborted' ? 'aborted' : 'completed';
+      }
+    }
+
+    // The sandboxed CLI wrote its rollout (and possibly refreshed the login)
+    // inside the sandbox; copy them back so history, the sessions index and
+    // the host's own Codex login stay current.
+    if (sandboxRun) {
+      try {
+        await sandboxRun.syncToHost(capturedSessionId);
+      } catch (syncError) {
+        console.error(`[Sandbox ${sandboxRun.sandboxName}] Failed to sync Codex state for ${capturedSessionId}:`, syncError);
       }
     }
   }

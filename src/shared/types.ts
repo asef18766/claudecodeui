@@ -583,6 +583,19 @@ export type QueuedDraft = {
   options?: QueuedSendOptions;
 };
 
+/** One local Docker image the composer's sandbox menu can offer (`GET /api/sandbox/images`); `templateReference` is set once the image has been exported into the sandbox template store and is what the server passes to `sbx create --template`. Used by the chat module's sandbox preference hook and sandbox menu. */
+export type SandboxImageOption = {
+  reference: string;
+  repository: string;
+  tag: string;
+  id: string;
+  size: string | null;
+  createdAt: string | null;
+  templateReference: string | null;
+  /** `com.docker.sandboxes.flavor` label; null when the image cannot host an agent kit. */
+  agentFlavor: string | null;
+};
+
 /** Viewport-relative placement box (right/bottom offsets plus max height and width) computed for a composer popover so the model and permission menus stay inside the window. */
 export type ComposerMenuAnchor = {
   right: number;

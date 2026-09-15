@@ -544,6 +544,13 @@ export const api = {
   system: {
     update: () => post('/api/system/update'),
   },
+
+  // Docker sandbox (Docker Sandboxes / sbx) availability for the composer toggle.
+  sandbox: {
+    status: () => get('/api/sandbox/status'),
+    images: () => get('/api/sandbox/images'),
+    importTemplate: (image: string) => post('/api/sandbox/templates/import', { image }),
+  },
 };
 
 // ---------------------------

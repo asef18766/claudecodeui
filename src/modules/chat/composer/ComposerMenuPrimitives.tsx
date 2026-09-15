@@ -61,6 +61,7 @@ export function ComposerMenuItem({
   role = 'menuitemradio',
   trailing,
   className,
+  disabled = false,
 }: {
   label: ReactNode;
   description?: ReactNode;
@@ -70,16 +71,21 @@ export function ComposerMenuItem({
   role?: 'menuitemradio' | 'menuitem';
   trailing?: ReactNode;
   className?: string;
+  /** Rows the user must see but cannot pick, e.g. a Docker image that cannot host the agent. */
+  disabled?: boolean;
 }) {
   return (
     <button
       type="button"
       role={role}
       aria-checked={role === 'menuitemradio' ? isSelected : undefined}
+      aria-disabled={disabled || undefined}
+      disabled={disabled}
       onClick={onSelect}
       className={cn(
         'flex w-full items-start gap-2.5 rounded-lg px-2.5 py-1.5 text-left text-sm transition-colors',
         'hover:bg-accent focus-visible:bg-accent focus-visible:outline-none',
+        'disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent',
         isSelected ? 'text-foreground' : 'text-foreground/90',
         className,
       )}

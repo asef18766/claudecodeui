@@ -34,6 +34,12 @@ type ProviderCapabilities = {
    * Whether a session's transcript can be branched into an independent one.
    */
   supportsSessionForking: boolean;
+  /**
+   * Whether a chat.send may set `options.sandbox` to run the turn inside the
+   * workspace's Docker sandbox (Docker Sandboxes / `sbx`). Only runtimes that
+   * can redirect their CLI launch into the sandbox advertise this.
+   */
+  supportsSandbox: boolean;
 };
 
 /**
@@ -57,6 +63,8 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     // `forkSession` copies a transcript prefix into a new session file.
     supportsMessageEditing: true,
     supportsSessionForking: true,
+    // The Agent SDK's spawn hook lets the CLI be launched through `sbx exec`.
+    supportsSandbox: true,
   },
   cursor: {
     provider: 'cursor',
@@ -70,6 +78,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: false,
     supportsMessageEditing: false,
     supportsSessionForking: false,
+    supportsSandbox: false,
   },
   codex: {
     provider: 'codex',
@@ -87,6 +96,10 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     // which is how Codex's own IDE clients do it.
     supportsMessageEditing: true,
     supportsSessionForking: true,
+    // The Codex SDK's `codexPathOverride` points at a launcher that forwards
+    // to `sbx exec`; forking/editing still runs the host app-server against
+    // the rollout synced back from the sandbox.
+    supportsSandbox: true,
   },
   opencode: {
     provider: 'opencode',
@@ -103,6 +116,7 @@ const PROVIDER_CAPABILITIES: Record<LLMProvider, ProviderCapabilities> = {
     supportsEffort: true,
     supportsMessageEditing: false,
     supportsSessionForking: false,
+    supportsSandbox: false,
   },
 };
 
