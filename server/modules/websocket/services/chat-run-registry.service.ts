@@ -1,6 +1,7 @@
 import { sessionsDb } from '@/modules/database/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { broadcastSessionUpserted } from '@/modules/websocket/services/session-upsert-broadcast.service.js';
+import { projectTrackingService } from '@/modules/project-tracking/index.js';
 import type {
   LLMProvider,
   NormalizedMessage,
@@ -105,6 +106,12 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     run.status = 'completed';
     run.completedAt = Date.now();
     evictRunLater(run.appSessionId);
+    const exitCode = typeof message.exitCode === 'number' ? message.exitCode : 0;
+    projectTrackingService.updateStatus(
+      run.appSessionId,
+      exitCode === 0 ? 'done' : 'error',
+      exitCode === 0 ? null : `Run exited with code ${exitCode}`,
+    );
   }
 
   run.events.push(outbound);
@@ -206,6 +213,7 @@ export const chatRunRegistry = {
     });
 
     runs.set(input.appSessionId, run);
+    projectTrackingService.updateStatus(input.appSessionId, 'running');
     return run;
   },
 

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react';
-import { Check, Edit2, GitBranch, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Edit2, GitBranch, ListPlus, Loader2, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { ActionMenu } from '@/shared/ui';
@@ -8,6 +8,7 @@ import type { LLMProvider } from '@/shared/types';
 import { useSessionForkingProviders } from '@/shared/hooks/useProviderCapabilities';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
 import { PROVIDER_LABELS } from '@/modules/sidebar/utils/sidebarProjectFormatting';
+import { api } from '@/shared/api';
 
 type SessionOptionsProps = {
   sessionId: string;
@@ -71,6 +72,18 @@ export default function SessionOptions({
   // provider id here; the request is cached module-side, so every row shares one.
   const forkableProviders = useSessionForkingProviders();
   const canFork = Boolean(onFork) && forkableProviders.has(provider) && !isProcessing;
+  // Prevents duplicate tracking requests while keeping the menu open long enough to show success.
+  const [trackingState, setTrackingState] = useState<'idle' | 'adding' | 'added' | 'error'>('idle');
+
+  const addToProjectTracking = async () => {
+    setTrackingState('adding');
+    try {
+      const response = await api.projectTracking.add(sessionId);
+      setTrackingState(response.ok ? 'added' : 'error');
+    } catch {
+      setTrackingState('error');
+    }
+  };
 
   // While editing, dismiss only when the click lands outside the rename panel,
   // matching Escape and the cancel button.
@@ -182,6 +195,15 @@ export default function SessionOptions({
               icon: GitBranch,
               onSelect: onFork,
             }] : []),
+            {
+              key: 'project-tracking',
+              label: trackingState === 'added' ? 'Added to project tracking' : 'Add to project tracking',
+              description: trackingState === 'error' ? 'Could not add. Click to retry.' : 'Track this session across projects.',
+              icon: trackingState === 'adding' ? Loader2 : trackingState === 'added' ? Check : ListPlus,
+              loading: trackingState === 'adding',
+              closeOnSelect: false,
+              onSelect: addToProjectTracking,
+            },
             ...(canDelete && !isProcessing ? [{
               key: 'delete',
               label: 'Archive or delete session',

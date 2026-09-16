@@ -51,7 +51,20 @@ export type ProviderModelActions = {
 //----------------- PROJECTS AND SESSIONS ------------
 
 /** Identifies the workspace pane the user is looking at; plugin panes are namespaced by plugin id. */
-export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'browser' | `plugin:${string}`;
+export type AppTab = 'chat' | 'files' | 'shell' | 'git' | 'tasks' | 'browser' | 'project-tracking' | `plugin:${string}`;
+
+/** A session pinned to the cross-project run board, including its latest terminal or live status. */
+export type ProjectTrackingItem = {
+  sessionId: string;
+  sessionName: string;
+  projectId: string | null;
+  projectName: string | null;
+  provider: LLMProvider;
+  status: 'running' | 'done' | 'error';
+  errorMessage: string | null;
+  addedAt: string;
+  updatedAt: string;
+};
 
 /** A message queued to be sent to a session at a future time. */
 export type ScheduledMessage = {
@@ -581,6 +594,19 @@ export type QueuedDraft = {
    * permission settings while another session is being viewed.
    */
   options?: QueuedSendOptions;
+};
+
+/** One local Docker image the composer's sandbox menu can offer (`GET /api/sandbox/images`); `templateReference` is set once the image has been exported into the sandbox template store and is what the server passes to `sbx create --template`. Used by the chat module's sandbox preference hook and sandbox menu. */
+export type SandboxImageOption = {
+  reference: string;
+  repository: string;
+  tag: string;
+  id: string;
+  size: string | null;
+  createdAt: string | null;
+  templateReference: string | null;
+  /** `com.docker.sandboxes.flavor` label; null when the image cannot host an agent kit. */
+  agentFlavor: string | null;
 };
 
 /** Viewport-relative placement box (right/bottom offsets plus max height and width) computed for a composer popover so the model and permission menus stay inside the window. */

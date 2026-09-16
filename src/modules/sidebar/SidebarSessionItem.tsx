@@ -1,5 +1,5 @@
 import { memo, useState } from 'react';
-import { Check, Edit2, Loader2, MoreHorizontal, Trash2, X } from 'lucide-react';
+import { Check, Edit2, ListPlus, Loader2, MoreHorizontal, Trash2, X } from 'lucide-react';
 import type { TFunction } from 'i18next';
 
 import { Badge, Dialog, DialogContent, DialogTitle, LLMProviderLogo, Tooltip, buttonVariants } from '@/shared/ui';
@@ -9,6 +9,7 @@ import { PROVIDER_LABELS, createSessionViewModel, formatCompactAge } from '@/mod
 import { useCompactSidebar } from '@/modules/sidebar/hooks/useCompactSidebar';
 import { useProviderSessionIdCopy } from '@/modules/sidebar/hooks/useProviderSessionIdCopy';
 import SessionOptions from '@/modules/sidebar/SessionOptions';
+import { api } from '@/shared/api';
 
 type SidebarSessionItemProps = {
   project: Project;
@@ -57,6 +58,8 @@ function SidebarSessionItem({
   const isSelected = selectedSession?.id === session.id;
   const compactSessionAge = formatCompactAge(sessionView.sessionTime, currentTime);
   const [isMobileOptionsOpen, setIsMobileOptionsOpen] = useState(false);
+  // Gives the mobile sheet immediate feedback while its tracking request is in flight.
+  const [isAddingToTracking, setIsAddingToTracking] = useState(false);
   const showAttentionIndicator = needsAttention && !isSelected;
   const showRecentIndicator = !showAttentionIndicator && !isProcessing && sessionView.isActive;
   const providerLabel = PROVIDER_LABELS[session.__provider];
@@ -291,6 +294,24 @@ function SidebarSessionItem({
                       <span className="mt-0.5 block text-xs">Tap to try again.</span>
                     )}
                   </span>
+                </button>
+
+                <button
+                  type="button"
+                  disabled={isAddingToTracking}
+                  onClick={async () => {
+                    setIsAddingToTracking(true);
+                    try {
+                      const response = await api.projectTracking.add(session.id);
+                      if (response.ok) setMobileOptionsOpen(false);
+                    } finally {
+                      setIsAddingToTracking(false);
+                    }
+                  }}
+                  className="flex min-h-12 w-full items-center gap-3 rounded-xl border border-border bg-muted/35 px-4 py-3 text-left text-foreground transition-colors active:bg-muted disabled:opacity-60"
+                >
+                  {isAddingToTracking ? <Loader2 className="h-5 w-5 animate-spin" /> : <ListPlus className="h-5 w-5" />}
+                  <span className="text-sm font-medium">Add to project tracking</span>
                 </button>
 
                 {!isProcessing && (

@@ -242,6 +242,26 @@
       "title": "正在替换先前的消息",
       "filesNotReverted": "已修改的文件不会被还原",
       "cancel": "取消"
+    },
+    "sandbox": {
+      "label": "Docker 沙箱",
+      "enable": "让 agent 与 workspace 在 Docker 沙箱内运行",
+      "disable": "Docker 沙箱已启用 — agent 在隔离的沙箱内运行。点击改回在主机上运行",
+      "unavailable": "无法使用 Docker 沙箱：请安装 Docker Sandboxes CLI（sbx）并运行 `sbx login`",
+      "checking": "正在检查 Docker 沙箱是否可用…",
+      "heading": "{{provider}} 要在哪里运行？",
+      "off": "在这台机器上",
+      "offDescription": "照常直接在主机上运行 agent",
+      "defaultTemplate": "Docker 沙箱（默认 image）",
+      "defaultTemplateDescription": "sbx 内置的 {{provider}} image",
+      "imagesHeading": "用本地 Docker image 创建沙箱",
+      "imagesLoading": "正在加载 Docker image…",
+      "noImages": "找不到本地 Docker image",
+      "imagesError": "无法列出 Docker image",
+      "imported": "已导入",
+      "importing": "正在把 image 导出为沙箱 template…",
+      "importFailed": "导入失败：{{error}}",
+      "incompatible": "无法运行 {{provider}} — image 需以 docker/sandbox-templates 为基底"
     }
   },
   "export": {

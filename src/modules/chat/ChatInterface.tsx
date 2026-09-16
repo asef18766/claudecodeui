@@ -18,6 +18,7 @@ import { useScheduledMessages } from '@/modules/chat/composer/useScheduledMessag
 import { useChatSessionState } from '@/modules/chat/hooks/useChatSessionState';
 import { useChatRealtimeHandlers } from '@/modules/chat/hooks/useChatRealtimeHandlers';
 import { useChatComposerState } from '@/modules/chat/hooks/useChatComposerState';
+import { useSandboxPreference } from '@/modules/chat/hooks/useSandboxPreference';
 import { useSessionStore } from '@/modules/chat/hooks/useSessionStore';
 import {
   useProcessingSessions,
@@ -119,9 +120,31 @@ function ChatInterface({
     resolvePermissionModeForProvider,
     supportsMessageEditing,
     supportsSessionForking,
+    supportsSandbox,
   } = useChatProviderState({
     selectedSession,
     selectedProject,
+  });
+
+  const {
+    sandboxEnabled,
+    sandboxRequested,
+    sandboxTemplate,
+    sandboxAvailable,
+    sandboxChecking,
+    sandboxUnavailableReason,
+    sandboxImages,
+    sandboxImagesError,
+    sandboxImportingImage,
+    sandboxImportError,
+    loadSandboxImages,
+    selectSandboxTemplate,
+    selectSandboxImage,
+    disableSandbox,
+  } = useSandboxPreference({
+    selectedProject,
+    selectedSession,
+    supported: supportsSandbox,
   });
 
   const {
@@ -239,6 +262,8 @@ function ChatInterface({
     cyclePermissionMode,
     currentProviderModel,
     currentProviderEffort,
+    sandboxEnabled,
+    sandboxTemplate,
     isLoading: isProcessing,
     processingSessions,
     canAbortSession,
@@ -355,12 +380,21 @@ function ChatInterface({
     const scheduled = await scheduleMessage({
       content,
       scheduledFor,
-      options: { model: currentProviderModel, effort: currentProviderEffort, permissionMode },
+      options: {
+        model: currentProviderModel,
+        effort: currentProviderEffort,
+        permissionMode,
+        sandbox: sandboxEnabled,
+        sandboxTemplate: sandboxEnabled ? sandboxTemplate : null,
+      },
     });
     if (scheduled) {
       setInput('');
     }
-  }, [currentProviderEffort, currentProviderModel, input, permissionMode, scheduleMessage, setInput]);
+  }, [currentProviderEffort, currentProviderModel, input, permissionMode, sandboxEnabled, sandboxTemplate, scheduleMessage, setInput]);
+
+  // The menu's "default image" row: sandbox on, no template.
+  const handleSelectSandboxDefault = useCallback(() => selectSandboxTemplate(null), [selectSandboxTemplate]);
 
   const permissionContextValue = useMemo(() => ({
     pendingPermissionRequests,
@@ -498,6 +532,21 @@ function ChatInterface({
           availablePermissionModes={availablePermissionModes}
           onSelectPermissionMode={selectPermissionMode}
           providerLabel={selectedProviderLabel}
+          showSandboxMenu={supportsSandbox}
+          sandboxRequested={sandboxRequested}
+          sandboxTemplate={sandboxTemplate}
+          sandboxAvailable={sandboxAvailable}
+          sandboxChecking={sandboxChecking}
+          sandboxUnavailableReason={sandboxUnavailableReason}
+          sandboxImages={sandboxImages}
+          sandboxImagesError={sandboxImagesError}
+          sandboxImportingImage={sandboxImportingImage}
+          sandboxImportError={sandboxImportError}
+          onLoadSandboxImages={loadSandboxImages}
+          onSelectSandboxDefault={handleSelectSandboxDefault}
+          onSelectSandboxImage={selectSandboxImage}
+          onDisableSandbox={disableSandbox}
+          sandboxProviderId={provider}
           effort={currentProviderEffort}
           availableEffortOptions={currentProviderEffortOptions}
           onSelectEffort={handleSelectComposerEffort}

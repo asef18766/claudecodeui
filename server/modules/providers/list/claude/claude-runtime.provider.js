@@ -37,6 +37,7 @@ import {
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
 import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { workspaceSandboxService } from '@/modules/sandbox/index.js';
 
 const activeSessions = new Map();
 const pendingToolApprovals = new Map();
@@ -688,7 +689,9 @@ async function loadMcpConfig(cwd) {
 /**
  * Executes a Claude query using the SDK
  * @param {string} command - User prompt/command
- * @param {Object} options - Query options
+ * @param {Object} options - Query options; `options.sandbox === true` runs the
+ *   CLI inside the workspace's Docker sandbox, built from `options.sandboxTemplate`
+ *   when set (see modules/sandbox)
  * @param {Object} ws - WebSocket connection
  * @param {Object} context - Provider-scoped model, session, and auth lookups
  * @returns {Promise<void>}
@@ -754,6 +757,9 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   // Hoisted above the try so the catch's cleanup can tell whether this run
   // still owns the activeSessions entry (or was superseded by a newer run).
   let queryInstance = null;
+  // Set when the turn runs inside a Docker sandbox; the finally block uses it
+  // to pull refreshed credentials back to the host.
+  let sandboxRun = null;
 
   try {
     const resolvedModel = await context.resolveResumeModel(sessionId, options.model);
@@ -771,7 +777,31 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       effortModels,
     });
 
-    const mcpServers = await loadMcpConfig(options.cwd);
+    // Docker sandbox mode: the CLI runs inside the workspace's sandbox via
+    // `sbx exec`, so every tool call (Bash, Edit, ...) happens there while the
+    // SDK keeps talking to it over stdio exactly as it would locally. Set up
+    // before the query so a missing `sbx` or a failed sandbox start is
+    // reported to the client as an ordinary run error.
+    sandboxRun = options.sandbox === true
+      ? await workspaceSandboxService.prepareClaudeRun({
+        cwd: options.cwd,
+        providerSessionId,
+        template: typeof options.sandboxTemplate === 'string' && options.sandboxTemplate ? options.sandboxTemplate : null,
+        // Images are inlined as base64 below, but non-image attachments are
+        // referenced by path in the prompt and read inside the sandbox.
+        attachmentPaths: (Array.isArray(options.files) ? options.files : [])
+          .map((descriptor) => descriptor?.path)
+          .filter((attachmentPath) => typeof attachmentPath === 'string'),
+      })
+      : null;
+    if (sandboxRun) {
+      sdkOptions.spawnClaudeCodeProcess = sandboxRun.spawnClaudeCodeProcess;
+    }
+
+    // Host MCP servers are not forwarded into a sandbox: stdio servers point
+    // at host binaries that do not exist there. The sandboxed CLI still loads
+    // whatever MCP config lives inside the sandbox.
+    const mcpServers = sandboxRun ? null : await loadMcpConfig(options.cwd);
     if (mcpServers) {
       sdkOptions.mcpServers = mcpServers;
     }
@@ -973,6 +1003,16 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       }
 
       if (message.type === 'result') {
+        // The sandboxed CLI wrote its transcript inside the sandbox; copy it
+        // back so history and the sessions index see this turn on the host.
+        if (sandboxRun && capturedSessionId) {
+          try {
+            await sandboxRun.syncTranscriptToHost(capturedSessionId);
+          } catch (syncError) {
+            console.error(`[Sandbox ${sandboxRun.sandboxName}] Failed to sync transcript for ${capturedSessionId}:`, syncError?.message || syncError);
+          }
+        }
+
         // The turn is done as far as the client is concerned.
         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
         if (!turnCompleteSent && !abortPending) {
@@ -1094,6 +1134,16 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       idleReleaseTimer = null;
     }
     releasePromptStream();
+
+    // The sandboxed CLI may have refreshed the OAuth login during the run;
+    // bring it back so the host (and the next sandbox) keep a valid token.
+    if (sandboxRun) {
+      try {
+        await sandboxRun.syncCredentialsToHost();
+      } catch (syncError) {
+        console.error(`[Sandbox ${sandboxRun.sandboxName}] Failed to sync credentials:`, syncError?.message || syncError);
+      }
+    }
   }
 }
 

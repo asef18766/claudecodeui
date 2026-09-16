@@ -14,7 +14,7 @@ import { PaperclipIcon, MessageSquareIcon, XIcon, Loader2, ArrowUpIcon, PencilIc
 
 import { useVoiceInput } from '@/modules/chat/hooks/useVoiceInput';
 import { useVoiceAvailable } from '@/modules/chat/hooks/useVoiceAvailable';
-import type { QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption } from '@/shared/types';
+import type { QueuedDraft, ScheduledMessage, SlashCommand,SessionActivity,PendingPermissionRequest,PermissionMode,ProviderModelOption,SandboxImageOption } from '@/shared/types';
 import {
   PromptInput,
   PromptInputHeader,
@@ -36,6 +36,7 @@ import { ScheduleMessagePopover } from '@/modules/chat/composer/ScheduleMessageP
 import { ScheduledMessageList } from '@/modules/chat/composer/ScheduledMessageList';
 import ComposerModelMenu from '@/modules/chat/composer/ComposerModelMenu';
 import ComposerPermissionMenu from '@/modules/chat/composer/ComposerPermissionMenu';
+import ComposerSandboxMenu from '@/modules/chat/composer/ComposerSandboxMenu';
 
 type MentionableFile = {
   name: string;
@@ -56,6 +57,23 @@ type ChatComposerProps = {
   availablePermissionModes: PermissionMode[];
   onSelectPermissionMode: (mode: PermissionMode) => void;
   providerLabel: string;
+  /** Hidden entirely when the active provider cannot run inside a Docker sandbox. */
+  showSandboxMenu: boolean;
+  sandboxRequested: boolean;
+  sandboxTemplate: string | null;
+  sandboxAvailable: boolean;
+  sandboxChecking: boolean;
+  sandboxUnavailableReason: string | null;
+  sandboxImages: SandboxImageOption[] | null;
+  sandboxImagesError: string | null;
+  sandboxImportingImage: string | null;
+  sandboxImportError: string | null;
+  onLoadSandboxImages: () => void;
+  onSelectSandboxDefault: () => void;
+  onSelectSandboxImage: (image: SandboxImageOption) => void;
+  onDisableSandbox: () => void;
+  /** Provider id the sandbox image must support (`claude`, `codex`, ...). */
+  sandboxProviderId: string;
   effort: string;
   availableEffortOptions: NonNullable<ProviderModelOption['effort']>['values'];
   onSelectEffort: (effort: string) => void;
@@ -131,6 +149,21 @@ export default function ChatComposer({
   availablePermissionModes,
   onSelectPermissionMode,
   providerLabel,
+  showSandboxMenu,
+  sandboxRequested,
+  sandboxTemplate,
+  sandboxAvailable,
+  sandboxChecking,
+  sandboxUnavailableReason,
+  sandboxImages,
+  sandboxImagesError,
+  sandboxImportingImage,
+  sandboxImportError,
+  onLoadSandboxImages,
+  onSelectSandboxDefault,
+  onSelectSandboxImage,
+  onDisableSandbox,
+  sandboxProviderId,
   effort,
   availableEffortOptions,
   onSelectEffort,
@@ -487,6 +520,26 @@ export default function ChatComposer({
               onSelectModel={onSelectModel}
               modelsLoading={modelsLoading}
             />
+
+            {showSandboxMenu && (
+              <ComposerSandboxMenu
+                requested={sandboxRequested}
+                template={sandboxTemplate}
+                available={sandboxAvailable}
+                checking={sandboxChecking}
+                unavailableReason={sandboxUnavailableReason}
+                images={sandboxImages}
+                imagesError={sandboxImagesError}
+                importingImage={sandboxImportingImage}
+                importError={sandboxImportError}
+                onLoadImages={onLoadSandboxImages}
+                onSelectDefault={onSelectSandboxDefault}
+                onSelectImage={onSelectSandboxImage}
+                onDisable={onDisableSandbox}
+                providerLabel={providerLabel}
+                providerId={sandboxProviderId}
+              />
+            )}
 
             <ComposerPermissionMenu
               permissionMode={permissionMode}

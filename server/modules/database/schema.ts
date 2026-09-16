@@ -167,6 +167,18 @@ CREATE TABLE IF NOT EXISTS app_config (
 );
 `;
 
+/** Sessions explicitly pinned to the cross-project tracking board. */
+export const PROJECT_TRACKING_TABLE_SCHEMA_SQL = `
+CREATE TABLE IF NOT EXISTS project_tracking (
+    session_id TEXT PRIMARY KEY NOT NULL,
+    status TEXT NOT NULL DEFAULT 'done' CHECK (status IN ('running', 'done', 'error')),
+    error_message TEXT,
+    added_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (session_id) REFERENCES sessions(session_id) ON DELETE CASCADE
+);
+`;
+
 /**
  * Persistent custom-model library used by the Providers module.
  *
@@ -293,6 +305,8 @@ CREATE INDEX IF NOT EXISTS idx_session_ids_lookup ON sessions(session_id);
 ${LAST_SCANNED_AT_SQL}
 
 ${APP_CONFIG_TABLE_SCHEMA_SQL}
+
+${PROJECT_TRACKING_TABLE_SCHEMA_SQL}
 
 ${PROVIDER_MODELS_TABLE_SCHEMA_SQL}
 CREATE INDEX IF NOT EXISTS idx_provider_models_provider_order

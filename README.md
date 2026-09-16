@@ -105,6 +105,8 @@ npx @cloudcli-ai/cloudcli@latest sandbox ~/my-project
 
 Supports Claude Code and Codex. See the [sandbox docs](docker/) for setup and advanced options.
 
+You can also keep CloudCLI on your host and sandbox only the agent: with the `sbx` CLI installed, the chat composer shows a **Docker sandbox** toggle for Claude Code and Codex. Opening it lets you pick where the agent runs: on this machine, in a sandbox built from the agent's default image, or in one built from any local Docker image — pick an image and CloudCLI exports it into the sandbox template store for you (`docker save` + `sbx template load`; images must be based on `docker/sandbox-templates:<agent>` to include the agent CLI). Each workspace, agent and image combination gets its own sandbox, created on first use. When it is on, each turn runs the agent's CLI inside that Docker Sandbox mounted on the project directory, so every command and file edit the agent performs happens inside the sandbox while the transcript is synced back to the host. Subscription logins are reused rather than needing API keys: the host's `~/.claude/.credentials.json` (Claude OAuth) and `~/.codex/auth.json` (Codex ChatGPT login) are synced into the sandbox before each turn and back afterwards, keeping whichever copy refreshed its tokens last. Hosts that use API keys instead can store them with `sbx secret set -g anthropic` / `sbx secret set -g openai`.
+
 ### Desktop Companion App
 
 CloudCLI Desktop is an optional native companion for CloudCLI Cloud and Local CloudCLI. It ships from this repository's GitHub Releases and keeps CloudCLI available from your menu bar or tray.

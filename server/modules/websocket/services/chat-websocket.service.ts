@@ -525,7 +525,9 @@ function handlePermissionResponse(data: AnyRecord, dependencies: ChatWebSocketDe
  * Handles authenticated chat websocket messages used by the main chat panel.
  *
  * Inbound protocol (client to server):
- * - `chat.send`                { sessionId, content, options? }
+ * - `chat.send`                { sessionId, content, options? } — `options.sandbox: true`
+ *                              runs the turn inside the workspace's Docker sandbox,
+ *                              built from `options.sandboxTemplate` when set
  * - `chat.abort`               { sessionId }
  * - `chat.subscribe`           { sessions: [{ sessionId, lastSeq? }] }
  * - `chat.permission-response` { requestId, allow, updatedInput?, message?, rememberEntry? }

@@ -257,6 +257,26 @@
       "title": "正在取代先前的訊息",
       "filesNotReverted": "已修改的檔案不會還原",
       "cancel": "取消"
+    },
+    "sandbox": {
+      "label": "Docker 沙箱",
+      "enable": "讓 agent 與 workspace 在 Docker 沙箱內執行",
+      "disable": "Docker 沙箱已啟用 — agent 在隔離的沙箱內執行。點擊改回在主機上執行",
+      "unavailable": "無法使用 Docker 沙箱：請安裝 Docker Sandboxes CLI（sbx）並執行 `sbx login`",
+      "checking": "正在檢查 Docker 沙箱是否可用…",
+      "heading": "{{provider}} 要在哪裡執行？",
+      "off": "在這台機器上",
+      "offDescription": "照常直接在主機上執行 agent",
+      "defaultTemplate": "Docker 沙箱（預設 image）",
+      "defaultTemplateDescription": "sbx 內建的 {{provider}} image",
+      "imagesHeading": "用本機 Docker image 建立沙箱",
+      "imagesLoading": "載入 Docker image 中…",
+      "noImages": "找不到本機 Docker image",
+      "imagesError": "無法列出 Docker image",
+      "imported": "已匯入",
+      "importing": "正在把 image 匯出成沙箱 template…",
+      "importFailed": "匯入失敗：{{error}}",
+      "incompatible": "無法執行 {{provider}} — image 需以 docker/sandbox-templates 為基底"
     }
   },
   "export": {

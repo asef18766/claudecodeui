@@ -65,6 +65,7 @@ type ProviderCapabilities = {
   supportsEffort?: boolean;
   supportsMessageEditing?: boolean;
   supportsSessionForking?: boolean;
+  supportsSandbox?: boolean;
 };
 
 type ProviderCapabilitiesApiResponse = {
@@ -470,6 +471,8 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
    * runtime would reject it.
    */
   const supportsMessageEditing = Boolean(providerCapabilities?.[provider]?.supportsMessageEditing);
+  // Only runtimes that can launch their CLI through `sbx exec` offer the composer's sandbox toggle.
+  const supportsSandbox = Boolean(providerCapabilities?.[provider]?.supportsSandbox);
   const supportsSessionForking = Boolean(providerCapabilities?.[provider]?.supportsSessionForking);
 
   const resolvePermissionModeForProvider = useCallback((
@@ -830,5 +833,6 @@ export function useChatProviderState({ selectedSession, selectedProject: _select
     resolvePermissionModeForProvider,
     supportsMessageEditing,
     supportsSessionForking,
+    supportsSandbox,
   };
 }

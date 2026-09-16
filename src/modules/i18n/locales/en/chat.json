@@ -149,6 +149,26 @@
       "title": "Replacing an earlier message",
       "filesNotReverted": "files the agent already changed are not reverted",
       "cancel": "Cancel"
+    },
+    "sandbox": {
+      "label": "Docker sandbox",
+      "enable": "Run the agent and workspace inside a Docker sandbox",
+      "disable": "Docker sandbox on — the agent runs in an isolated sandbox. Click to run on the host instead",
+      "unavailable": "Docker sandbox unavailable: install the Docker Sandboxes CLI (sbx) and run `sbx login`",
+      "checking": "Checking Docker sandbox availability…",
+      "heading": "Where should {{provider}} run?",
+      "off": "On this machine",
+      "offDescription": "Run the agent directly on the host, as usual",
+      "defaultTemplate": "Docker sandbox (default image)",
+      "defaultTemplateDescription": "sbx built-in image for {{provider}}",
+      "imagesHeading": "Build the sandbox from a local Docker image",
+      "imagesLoading": "Loading Docker images…",
+      "noImages": "No local Docker images found",
+      "imagesError": "Could not list Docker images",
+      "imported": "ready",
+      "importing": "Exporting image into the sandbox template store…",
+      "importFailed": "Import failed: {{error}}",
+      "incompatible": "Cannot run {{provider}} — build it FROM docker/sandbox-templates"
     }
   },
   "providerSelection": {
