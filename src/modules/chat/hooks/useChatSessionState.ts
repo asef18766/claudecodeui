@@ -313,7 +313,10 @@ export function useChatSessionState({
   // open. Session ids are concrete before any send, so no pending
   // placeholder entry exists anymore.
   const sessionActivity = (activeSessionId && processingSessions?.get(activeSessionId)) || null;
-  const isProcessing = sessionActivity !== null;
+  // Only a live turn blocks the composer. Background work the finished turn
+  // left running keeps the activity indicator up, but the user can already
+  // send the next message — which is exactly what the CLI allows.
+  const isProcessing = sessionActivity !== null && sessionActivity.phase !== 'background';
   const canAbortSession = isProcessing && sessionActivity.canInterrupt;
 
   // Ref mirror so effects can read the latest map without re-running on

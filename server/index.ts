@@ -52,7 +52,7 @@ import browserUseRoutes from './modules/browser-use/browser-use.routes.js';
 import { assetsRoutes } from './modules/assets/index.js';
 import { fileTreeRoutes } from './modules/file-tree/index.js';
 import { worktreesRoutes } from './modules/worktrees/index.js';
-import { createProjectTrackingRouter } from './modules/project-tracking/index.js';
+import { createProjectTrackingRouter, projectTrackingService } from './modules/project-tracking/index.js';
 import browserUseMcpRoutes from './modules/browser-use/browser-use-mcp.routes.js';
 import { browserUseService } from './modules/browser-use/browser-use.service.js';
 import { initializeDatabase, sessionsDb } from './modules/database/index.js';
@@ -198,7 +198,7 @@ app.use('/api/browser-use', authenticateToken, browserUseRoutes);
 // Unified provider MCP routes (protected)
 app.use('/api/providers', authenticateToken, providerRoutes);
 app.use('/api/scheduled-messages', authenticateToken, scheduledMessagesRoutes);
-app.use('/api/project-tracking', authenticateToken, createProjectTrackingRouter((sessionId) => chatRunRegistry.isProcessing(sessionId)));
+app.use('/api/project-tracking', authenticateToken, createProjectTrackingRouter((sessionId) => chatRunRegistry.isBusy(sessionId)));
 
 // Agent API Routes (uses API key authentication)
 app.use('/api/agent', agentRoutes);
@@ -335,6 +335,10 @@ async function startServer() {
     try {
         // Initialize authentication database
         await initializeDatabase();
+
+        // Live runs are in-memory only, so any tracked run still marked running
+        // belongs to a process that is gone.
+        projectTrackingService.reconcileInterruptedRuns();
 
         // Configure Web Push (VAPID keys)
         configureWebPush();

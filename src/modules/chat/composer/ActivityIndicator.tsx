@@ -69,6 +69,9 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
   const actionWords = ACTION_KEYS.map((key, i) => t(key, { defaultValue: DEFAULT_ACTION_WORDS[i] }));
   const label = (renderedActivity.statusText || actionWords[Math.floor(elapsedSeconds / 4) % actionWords.length])
     .replace(/\.+$/, '');
+  // Work the finished turn left running: the session is still busy, but the
+  // reply already landed, so it reads as a quieter state than a live turn.
+  const isBackground = renderedActivity.phase === 'background';
 
   const minutes = Math.floor(elapsedSeconds / 60);
   const seconds = elapsedSeconds % 60;
@@ -90,7 +93,10 @@ export default function ActivityIndicator({ activity, onAbort, isInputFocused = 
     >
       <div className="flex items-end justify-between gap-2">
         <div className={`${tabSurfaceClassName} gap-2`}>
-          <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-primary" aria-hidden />
+          <span
+            className={`h-1.5 w-1.5 shrink-0 animate-pulse rounded-full ${isBackground ? 'bg-muted-foreground' : 'bg-primary'}`}
+            aria-hidden
+          />
           <Shimmer className="font-medium">{`${label}…`}</Shimmer>
           <span className="tabular-nums text-muted-foreground/60">{elapsedLabel}</span>
         </div>

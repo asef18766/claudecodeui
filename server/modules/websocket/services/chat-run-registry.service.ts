@@ -2,13 +2,23 @@ import { sessionsDb } from '@/modules/database/index.js';
 import { ChatSessionWriter } from '@/modules/websocket/services/chat-session-writer.service.js';
 import { broadcastSessionUpserted } from '@/modules/websocket/services/session-upsert-broadcast.service.js';
 import { projectTrackingService } from '@/modules/project-tracking/index.js';
+import { describeBackgroundWork } from '@/shared/utils.js';
 import type {
   LLMProvider,
   NormalizedMessage,
   RealtimeClientConnection,
+  RunActivityState,
+  RunBackgroundTask,
 } from '@/shared/types.js';
 
 type ChatRunStatus = 'running' | 'completed';
+
+/** How a finished run ended, kept so the tracking board can be written once the session is finally idle. */
+type ChatRunOutcome = {
+  exitCode: number;
+  aborted: boolean;
+  terminalReason: string | null;
+};
 
 /**
  * One live (or recently finished) provider run for a single app session.
@@ -23,12 +33,23 @@ type ChatRunStatus = 'running' | 'completed';
  * - `lastSeq` / `events`: the per-run event log. Every live event gets a
  *   monotonically increasing `seq` and is buffered so a reconnecting client
  *   can replay exactly the events it missed via `chat.subscribe`.
+ * - `activity`: what the session is actually doing, as the provider runtime
+ *   reports it via `run_state`. Deliberately separate from `status`: a turn
+ *   can be over (`status: completed`, so the next message may be sent) while
+ *   the work it launched is still running (`activity: background`). Only
+ *   `activity` is allowed to claim a session is idle.
+ * - `outcome`: how the run ended. Recorded on `complete` and applied to the
+ *   tracking board once `activity` reaches `idle`, so a session with
+ *   background work is not filed as done the moment its turn returns.
  */
 type ChatRun = {
   appSessionId: string;
   provider: LLMProvider;
   providerSessionId: string | null;
   status: ChatRunStatus;
+  activity: RunActivityState;
+  backgroundTasks: RunBackgroundTask[];
+  outcome: ChatRunOutcome | null;
   lastSeq: number;
   events: NormalizedMessage[];
   writer: ChatSessionWriter;
@@ -73,6 +94,63 @@ function evictRunLater(appSessionId: string): void {
 }
 
 /**
+ * Reasons a provider reports for a run that stopped without finishing its
+ * work. Anything outside this set (including no reason at all) is a clean end.
+ */
+const UNFINISHED_TERMINAL_REASONS = new Set([
+  'aborted_streaming',
+  'aborted_tools',
+  'max_turns',
+  'stop_hook_prevented',
+  'hook_stopped',
+  'blocking_limit',
+  'rapid_refill_breaker',
+  'prompt_too_long',
+  'image_error',
+  'model_error',
+  'tool_deferred',
+]);
+
+/**
+ * Maps how a run ended onto a tracking-board row.
+ *
+ * An interrupted run used to land on the board as `done`, because the abort
+ * path reports exit code 0 for a *successful* interrupt. The provider's own
+ * terminal reason is what separates "the user stopped it" from "it finished".
+ */
+function trackingOutcomeFor(outcome: ChatRunOutcome): { status: 'done' | 'error'; message: string | null } {
+  if (outcome.aborted) {
+    return { status: 'error', message: 'Interrupted before finishing' };
+  }
+
+  if (outcome.terminalReason && UNFINISHED_TERMINAL_REASONS.has(outcome.terminalReason)) {
+    return { status: 'error', message: `Stopped early (${outcome.terminalReason})` };
+  }
+
+  if (outcome.exitCode !== 0) {
+    return { status: 'error', message: `Run exited with code ${outcome.exitCode}` };
+  }
+
+  return { status: 'done', message: null };
+}
+
+/**
+ * Applies a finished run's outcome to the tracking board and lets it be
+ * evicted. Deferred while background work is still in flight, so a session
+ * that launched a background shell or a subagent keeps its board row (and its
+ * sidebar indicator) until that work actually reports back.
+ */
+function settleRun(run: ChatRun): void {
+  if (!run.outcome || run.activity !== 'idle') {
+    return;
+  }
+
+  const { status, message } = trackingOutcomeFor(run.outcome);
+  projectTrackingService.updateStatus(run.appSessionId, status, message);
+  evictRunLater(run.appSessionId);
+}
+
+/**
  * Decorates one outbound live event for a run and records it in the event log.
  *
  * Responsibilities:
@@ -81,6 +159,8 @@ function evictRunLater(appSessionId: string): void {
  * 2. Assign the next `seq` so clients can detect/replay gaps.
  * 3. Buffer the event for `chat.subscribe` replay.
  * 4. Flip the run to `completed` when the terminal `complete` event passes by.
+ * 5. Track the provider-reported `activity` so "is this session busy" stops
+ *    being inferred from `complete`.
  */
 function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): NormalizedMessage | null {
   // Exactly-one-complete contract: when a run is aborted the chat handler
@@ -88,6 +168,14 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
   // still emit its own `complete` from its exit handler moments later.
   // Whichever arrives first wins; the duplicate is dropped here.
   if (message.kind === 'complete' && run.status === 'completed') {
+    return null;
+  }
+
+  // A run held open for background work can still be winding down when the
+  // user sends the next message, and its trailing `run_state: idle` would
+  // clear the indicator for the run that replaced it. State only counts while
+  // this run is still the session's current one.
+  if (message.kind === 'run_state' && runs.get(run.appSessionId) !== run) {
     return null;
   }
 
@@ -99,19 +187,32 @@ function decorateAndRecordEvent(run: ChatRun, message: NormalizedMessage): Norma
     seq: run.lastSeq,
   };
 
+  if (message.kind === 'run_state') {
+    run.activity = message.state ?? 'idle';
+    run.backgroundTasks = Array.isArray(message.backgroundTasks) ? message.backgroundTasks : [];
+    if (run.activity === 'idle') {
+      settleRun(run);
+    }
+  }
+
   if (message.kind === 'complete') {
     // The provider may report its own id here; the frontend only ever knows
     // the app id, so the "actual" id is by definition the app id as well.
     outbound.actualSessionId = run.appSessionId;
     run.status = 'completed';
     run.completedAt = Date.now();
-    evictRunLater(run.appSessionId);
-    const exitCode = typeof message.exitCode === 'number' ? message.exitCode : 0;
-    projectTrackingService.updateStatus(
-      run.appSessionId,
-      exitCode === 0 ? 'done' : 'error',
-      exitCode === 0 ? null : `Run exited with code ${exitCode}`,
-    );
+    run.outcome = {
+      exitCode: typeof message.exitCode === 'number' ? message.exitCode : 0,
+      aborted: message.aborted === true,
+      terminalReason: typeof message.terminalReason === 'string' ? message.terminalReason : null,
+    };
+    // The turn is over, but the session is only idle if the runtime says so.
+    // Carrying the follow-on state on the `complete` itself (rather than as a
+    // separate event right after it) keeps the two atomic: there is no window
+    // where a session with background work looks finished.
+    run.backgroundTasks = Array.isArray(message.backgroundTasks) ? message.backgroundTasks : [];
+    run.activity = message.state === 'background' ? 'background' : 'idle';
+    settleRun(run);
   }
 
   run.events.push(outbound);
@@ -194,6 +295,9 @@ export const chatRunRegistry = {
       provider: input.provider,
       providerSessionId: input.providerSessionId,
       status: 'running',
+      activity: 'running',
+      backgroundTasks: [],
+      outcome: null,
       lastSeq: 0,
       events: [],
       writer: null as unknown as ChatSessionWriter,
@@ -221,24 +325,60 @@ export const chatRunRegistry = {
     return runs.get(appSessionId);
   },
 
+  /**
+   * Whether a turn is in flight — the gate for sends, replay and abort.
+   *
+   * Deliberately narrower than "busy": a session whose turn finished but whose
+   * background work is still running answers `false` here (so the next message
+   * can be sent) and `background` from `getActivity`.
+   */
   isProcessing(appSessionId: string): boolean {
     return runs.get(appSessionId)?.status === 'running';
   },
 
+  /** What the session is doing, as its runtime last reported. */
+  getActivity(appSessionId: string): RunActivityState {
+    return runs.get(appSessionId)?.activity ?? 'idle';
+  },
+
+  /** Whether anything at all is outstanding — a turn, or work a turn launched. */
+  isBusy(appSessionId: string): boolean {
+    return (runs.get(appSessionId)?.activity ?? 'idle') !== 'idle';
+  },
+
+  /**
+   * Every session that is still doing something, for the sidebar indicator and
+   * the running-sessions poll.
+   *
+   * `phase` separates a live turn from leftover background work: the chat
+   * composer must stay usable during the latter, while the sidebar and the
+   * tracking board should still show the session as busy.
+   */
   listRunningRuns(): Array<{
     sessionId: string;
     provider: LLMProvider;
     startedAt: number;
     lastSeq: number;
+    phase: 'turn' | 'background';
+    statusText: string | null;
+    canInterrupt: boolean;
+    backgroundTasks: RunBackgroundTask[];
   }> {
     return Array.from(runs.values())
-      .filter((run) => run.status === 'running')
-      .map((run) => ({
-        sessionId: run.appSessionId,
-        provider: run.provider,
-        startedAt: run.startedAt,
-        lastSeq: run.lastSeq,
-      }));
+      .filter((run) => run.activity !== 'idle')
+      .map((run) => {
+        const isBackground = run.activity === 'background';
+        return {
+          sessionId: run.appSessionId,
+          provider: run.provider,
+          startedAt: run.startedAt,
+          lastSeq: run.lastSeq,
+          phase: isBackground ? ('background' as const) : ('turn' as const),
+          statusText: isBackground ? describeBackgroundWork(run.backgroundTasks) : null,
+          canInterrupt: !isBackground,
+          backgroundTasks: run.backgroundTasks,
+        };
+      });
   },
 
   /**

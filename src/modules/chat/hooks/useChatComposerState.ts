@@ -844,6 +844,9 @@ export function useChatComposerState({
       onSessionProcessing?.(targetSessionId, {
         statusText: null,
         canInterrupt: true,
+        // A send always starts a turn, even when the session was still
+        // finishing background work from the previous one.
+        phase: 'turn',
       });
 
       setIsUserScrolledUp(false);

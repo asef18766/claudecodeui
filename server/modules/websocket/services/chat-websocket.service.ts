@@ -471,10 +471,13 @@ function handleChatSubscribe(
 
     const run = chatRunRegistry.getRun(sessionId);
     const isProcessing = chatRunRegistry.isProcessing(sessionId);
+    const activity = chatRunRegistry.getActivity(sessionId);
 
     // Future live events for this run should land on the socket that asked —
     // this is what makes mid-stream page refreshes work for all providers.
-    if (isProcessing) {
+    // A session whose turn is over but whose background work is still running
+    // attaches too, so the client is there for the `run_state` that ends it.
+    if (activity !== 'idle') {
       chatRunRegistry.attachConnection(sessionId, ws);
     }
 
@@ -486,6 +489,11 @@ function handleChatSubscribe(
       kind: 'chat_subscribed',
       sessionId,
       isProcessing,
+      // `isProcessing` answers "can I send" — `activity` answers "is anything
+      // still happening". They differ while background work outlives its turn,
+      // and a client that only reads the former drops the indicator too early.
+      activity,
+      backgroundTasks: run?.backgroundTasks ?? [],
       lastSeq: run?.lastSeq ?? 0,
       pendingPermissions,
       timestamp: new Date().toISOString(),

@@ -190,7 +190,8 @@ export type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'history_truncated'
-  | 'task_notification';
+  | 'task_notification'
+  | 'run_state';
 
 /**
  * Event kinds added by the chat gateway layer on top of provider message kinds.
@@ -258,6 +259,32 @@ export type SessionUpsertedEvent = {
  * Every provider-specific message must be converted into this shape before being
  * emitted outside provider-specific modules.
  */
+/**
+ * What a session is doing right now, as reported by the provider runtime
+ * rather than inferred from the event stream.
+ *
+ * - `running`         — a turn is in flight
+ * - `requires_action` — the turn is parked waiting for the user (permission prompt)
+ * - `background`      — the turn is over, but work it started is still running
+ *                       (background shells, subagents, monitors, scheduled wake-ups)
+ * - `idle`            — nothing is outstanding
+ *
+ * `background` exists because Claude reports its turn `result` while the CLI
+ * process is still held open for the work that turn launched: treating that
+ * `result` as "done" is what made the sidebar and the tracking board claim a
+ * session had finished while it was still producing.
+ */
+export type RunActivityState = 'running' | 'requires_action' | 'background' | 'idle';
+
+/** One in-flight background task as the provider runtime reports it. */
+export type RunBackgroundTask = {
+  id: string;
+  /** Friendly task-type label, e.g. `shell`, `subagent`, `monitor`, `workflow`, `cron`. */
+  type: string;
+  status: string;
+  description: string;
+};
+
 export type NormalizedMessage = {
   id: string;
   /**
@@ -310,6 +337,17 @@ export type NormalizedMessage = {
   text?: string;
   tokens?: number;
   canInterrupt?: boolean;
+  /** `run_state` payload: what the session is doing now. */
+  state?: RunActivityState;
+  /** `run_state` payload: the work still outstanding when `state` is `background`. */
+  backgroundTasks?: RunBackgroundTask[];
+  /**
+   * `complete` payload: why the run ended, straight from the provider
+   * (`completed`, `aborted_streaming`, `max_turns`, ...). Distinguishes a run
+   * the user interrupted from one that finished on its own, which an exit code
+   * alone cannot.
+   */
+  terminalReason?: string;
   requestId?: string;
   input?: unknown;
   context?: unknown;
