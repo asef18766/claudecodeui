@@ -170,6 +170,28 @@ export type SessionActivity = {
    * the elapsed-time display and the stale `chat_subscribed` idle-ack guard.
    */
   startedAt: number;
+  /**
+   * `turn` while the request itself is in flight, `background` once the turn
+   * has answered but work it started (background shells, subagents, monitors,
+   * scheduled wake-ups) is still running.
+   *
+   * The session is busy in both phases — that is what the sidebar and the
+   * tracking board show — but only `turn` blocks the composer and offers an
+   * interrupt, so a session finishing background work can still be talked to.
+   */
+  phase: SessionActivityPhase;
+};
+
+/** Which half of a session's activity an entry describes; see `SessionActivity.phase`. */
+export type SessionActivityPhase = 'turn' | 'background';
+
+/** One still-running background task, as the provider runtime reports it. */
+export type RunBackgroundTask = {
+  id: string;
+  /** Friendly task-type label, e.g. `shell`, `subagent`, `monitor`, `workflow`, `cron`. */
+  type: string;
+  status: string;
+  description: string;
 };
 
 /** Every session currently producing a response, keyed by session id. Read it to tell whether a session is busy. */
@@ -178,7 +200,7 @@ export type SessionActivityMap = ReadonlyMap<string, SessionActivity>;
 /** Marks a session as producing a response; call it as soon as a send is dispatched so the UI reacts immediately. */
 export type MarkSessionProcessing = (
   sessionId?: string | null,
-  activity?: { statusText?: string | null; canInterrupt?: boolean },
+  activity?: { statusText?: string | null; canInterrupt?: boolean; phase?: SessionActivityPhase },
 ) => void;
 
 /** Marks a session as finished; `ifStartedBefore` lets a late acknowledgement clear only a stale run. */
@@ -201,6 +223,7 @@ export type SessionActivitySnapshot = {
   statusText?: string | null;
   canInterrupt?: boolean;
   startedAt?: number;
+  phase?: SessionActivityPhase;
 };
 
 // ---------------------------
@@ -476,6 +499,12 @@ export type NormalizedMessage = {
   text?: string;
   tokens?: number;
   canInterrupt?: boolean;
+  /** `run_state` / `complete` payload: what the session is doing now. */
+  state?: 'running' | 'requires_action' | 'background' | 'idle';
+  /** `run_state` / `complete` payload: work still outstanding when `state` is `background`. */
+  backgroundTasks?: RunBackgroundTask[];
+  /** `complete` payload: the provider's own reason the run ended, e.g. `completed`, `aborted_tools`. */
+  terminalReason?: string;
   tokenBudget?: unknown;
   requestId?: string;
   input?: unknown;
@@ -514,7 +543,8 @@ type MessageKind =
   | 'permission_cancelled'
   | 'session_created'
   | 'history_truncated'
-  | 'task_notification';
+  | 'task_notification'
+  | 'run_state';
 
 // ---------------------------
 

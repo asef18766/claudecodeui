@@ -36,7 +36,7 @@ import {
   notifyRunStopped,
   notifyUserIfEnabled
 } from '@/modules/notifications/index.js';
-import { createCompleteMessage, createNormalizedMessage } from '@/shared/utils.js';
+import { createCompleteMessage, createNormalizedMessage, createRunStateMessage } from '@/shared/utils.js';
 import { workspaceSandboxService } from '@/modules/sandbox/index.js';
 
 const activeSessions = new Map();
@@ -547,8 +547,11 @@ const DEFERRED_WORK_TOOLS = new Set(['Monitor', 'ScheduleWakeup', 'CronCreate', 
 /**
  * Detects tool calls that keep working after the turn's `result` arrives.
  *
- * Only turns that start background work need their CLI process held open; every
- * other turn can let it exit immediately, as it did before the hold existed.
+ * Fallback only. The CLI's own `Stop` hook reports exactly what is still in
+ * flight (`background_tasks`, `session_crons`), and that snapshot is used when
+ * it is available; this name-matching heuristic covers the cases where the
+ * hook never ran — an SDK build that rejected our hook shapes, or a turn that
+ * ended without reaching `Stop`.
  *
  * @param {Object} sdkMessage - SDK stream message
  * @returns {boolean} True when the message launches work that outlives the turn
@@ -567,6 +570,102 @@ function startsBackgroundWork(sdkMessage) {
       return block.input?.run_in_background === true;
     }
     return DEFERRED_WORK_TOOLS.has(block.name);
+  });
+}
+
+/**
+ * Identity of one published run state, so an unchanged state is not re-sent.
+ *
+ * Task status is part of it: during a hold the set of outstanding tasks shrinks
+ * and the client's label has to follow, but nothing else should produce a frame.
+ *
+ * @param {string} state - Run activity state
+ * @param {Array<{id: string, status: string}>} tasks - Outstanding background work
+ * @returns {string} Stable signature
+ */
+function runStateSignature(state, tasks) {
+  return `${state}:${tasks.map((task) => `${task.id}|${task.status}`).join(',')}`;
+}
+
+/**
+ * Normalizes the CLI's own background-work snapshot into the shape the app
+ * streams to clients.
+ *
+ * `Stop` hook input carries two independent lists: work that is running right
+ * now (`background_tasks` — shells, subagents, monitors, workflows) and work
+ * scheduled to wake the session later (`session_crons` — CronCreate,
+ * ScheduleWakeup, /loop). Both keep the CLI process alive, so both count as
+ * "this session is not finished".
+ *
+ * @param {Object} stopInput - `Stop` hook input
+ * @returns {Array<{id: string, type: string, status: string, description: string}>}
+ */
+function readBackgroundWorkSnapshot(stopInput) {
+  const tasks = Array.isArray(stopInput?.background_tasks) ? stopInput.background_tasks : [];
+  const crons = Array.isArray(stopInput?.session_crons) ? stopInput.session_crons : [];
+
+  return [
+    ...tasks.map((task) => ({
+      id: String(task?.id ?? ''),
+      type: String(task?.type ?? 'task'),
+      status: String(task?.status ?? 'running'),
+      description: String(task?.description || task?.command || task?.agent_type || task?.tool || task?.name || task?.type || 'background task')
+    })),
+    ...crons.map((cron) => ({
+      id: String(cron?.id ?? ''),
+      type: 'cron',
+      status: 'scheduled',
+      description: cron?.recurring
+        ? `scheduled wake-up (${cron?.schedule ?? 'recurring'})`
+        : 'scheduled wake-up'
+    }))
+  ];
+}
+
+/**
+ * Folds a `task_started` / `task_updated` system message into the live task map.
+ *
+ * These arrive while the turn is still streaming and are what makes the
+ * background-work label change ("2 tasks" to "1 task") instead of freezing at
+ * whatever the turn ended with.
+ *
+ * @param {Map<string, Object>} tasks - Live task map, keyed by task id
+ * @param {Object} sdkMessage - SDK `system` message
+ */
+function applyTaskEvent(tasks, sdkMessage) {
+  const taskId = typeof sdkMessage?.task_id === 'string' ? sdkMessage.task_id : null;
+  if (!taskId) {
+    return;
+  }
+
+  if (sdkMessage.subtype === 'task_started') {
+    tasks.set(taskId, {
+      id: taskId,
+      type: sdkMessage.task_type || (sdkMessage.subagent_type ? 'subagent' : 'task'),
+      status: 'running',
+      description: sdkMessage.description || sdkMessage.workflow_name || sdkMessage.subagent_type || 'background task'
+    });
+    return;
+  }
+
+  const existing = tasks.get(taskId);
+  if (!existing) {
+    return;
+  }
+
+  const patch = sdkMessage.patch || {};
+  const status = typeof patch.status === 'string' ? patch.status : existing.status;
+  // Only work that can still report back counts; a finished or killed task must
+  // not keep the session looking busy.
+  if (status === 'completed' || status === 'failed' || status === 'killed') {
+    tasks.delete(taskId);
+    return;
+  }
+
+  tasks.set(taskId, {
+    ...existing,
+    status,
+    description: typeof patch.description === 'string' ? patch.description : existing.description
   });
 }
 
@@ -726,10 +825,42 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
   let turnCompleteSent = false;
   // Set when a turn starts background work, cleared when the next `result`
   // arrives — only turns with work still outstanding hold their process open.
+  // Fallback signal: the `Stop` hook's snapshot wins whenever it ran.
   let backgroundWorkPending = false;
   // True while the process is being held open for background work, so a later
   // `result` can be recognised as that work reporting back.
   let heldForBackgroundWork = false;
+  // What the CLI's `Stop` hook reported for the turn that is ending, consumed
+  // by the next `result` and then cleared. Null when the hook has not run for
+  // the current turn.
+  let stopHookSnapshot = null;
+  // Live background tasks, fed by the CLI's `task_started` / `task_updated`
+  // system messages and reconciled against the `Stop` hook snapshot.
+  const liveBackgroundTasks = new Map();
+  // Signature of what was last published to the client, so the run's activity
+  // is only re-announced when the state or the outstanding work changed.
+  let publishedRunState = runStateSignature('running', []);
+
+  /**
+   * Publishes the session's activity when it changes.
+   *
+   * The app used to infer this from the event stream — a `result` meant done —
+   * which is exactly what made a session with background work read as
+   * finished. This reports what the CLI says instead.
+   */
+  const publishRunState = (state, tasks = []) => {
+    const signature = runStateSignature(state, tasks);
+    if (signature === publishedRunState) {
+      return;
+    }
+    publishedRunState = signature;
+    ws.send(createRunStateMessage({
+      provider: 'claude',
+      sessionId: capturedSessionId || sessionId || null,
+      state,
+      backgroundTasks: tasks
+    }));
+  };
   // Set once a turn publishes a budget read from an assistant message, so the
   // turn-ending `result` is only mined for usage when nothing better arrived.
   let assistantBudgetSent = false;
@@ -812,6 +943,15 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
     const promptMessages = await buildPromptMessages(command, options.images, options.files, options.cwd);
 
     sdkOptions.hooks = {
+      // The CLI knows exactly what is still in flight when a turn ends; this is
+      // the authoritative replacement for guessing from tool names.
+      Stop: [{
+        matcher: '',
+        hooks: [async (input) => {
+          stopHookSnapshot = readBackgroundWorkSnapshot(input);
+          return {};
+        }]
+      }],
       Notification: [{
         matcher: '',
         hooks: [async (input) => {
@@ -1002,6 +1142,33 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
         backgroundWorkPending = true;
       }
 
+      if (message.type === 'system') {
+        if (message.subtype === 'task_started' || message.subtype === 'task_updated') {
+          applyTaskEvent(liveBackgroundTasks, message);
+          // During the post-turn hold this is what keeps the label honest as
+          // tasks finish one by one.
+          if (heldForBackgroundWork) {
+            publishRunState('background', [...liveBackgroundTasks.values()]);
+          }
+        } else if (message.subtype === 'session_state_changed') {
+          // The CLI's own view of the session. While the turn is live it maps
+          // straight through; once the turn has reported complete, anything
+          // still happening is background work as far as the app is concerned.
+          //
+          // Forward-compatible: the SDK types this message and passes it
+          // through, but CLI 2.1.272 does not emit it for an ordinary turn.
+          // Everything the app needs today comes from the `Stop` hook and the
+          // task events below, so this only adds precision when it does arrive.
+          if (heldForBackgroundWork) {
+            if (message.state !== 'idle') {
+              publishRunState('background', [...liveBackgroundTasks.values()]);
+            }
+          } else if (!turnCompleteSent && message.state !== 'idle') {
+            publishRunState(message.state === 'requires_action' ? 'requires_action' : 'running');
+          }
+        }
+      }
+
       if (message.type === 'result') {
         // The sandboxed CLI wrote its transcript inside the sandbox; copy it
         // back so history and the sessions index see this turn on the host.
@@ -1013,11 +1180,46 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
           }
         }
 
+        // What the CLI reported at `Stop` is the truth about outstanding work;
+        // the tool-name heuristic only stands in when the hook never ran.
+        if (stopHookSnapshot) {
+          liveBackgroundTasks.clear();
+          for (const task of stopHookSnapshot) {
+            liveBackgroundTasks.set(task.id || `${task.type}:${task.description}`, task);
+          }
+        }
+        const backgroundTasks = [...liveBackgroundTasks.values()];
+        const hasBackgroundWork = stopHookSnapshot
+          ? backgroundTasks.length > 0
+          : backgroundWorkPending;
+        stopHookSnapshot = null;
+
+        // `result` carries why the turn ended. An exit code alone cannot tell a
+        // run the user interrupted from one that finished, which is how an
+        // aborted run used to land on the tracking board as done.
+        const turnFailed = message.subtype !== 'success' || message.is_error === true;
+        const terminalReason = typeof message.terminal_reason === 'string'
+          ? message.terminal_reason
+          : (message.subtype !== 'success' ? message.subtype : 'completed');
+
         // The turn is done as far as the client is concerned.
         const abortPending = sessionKey() ? abortedSessionIds.has(sessionKey()) : false;
         if (!turnCompleteSent && !abortPending) {
           turnCompleteSent = true;
-          ws.send(createCompleteMessage({ provider: 'claude', sessionId: capturedSessionId || sessionId || null, exitCode: 0 }));
+          ws.send(createCompleteMessage({
+            provider: 'claude',
+            sessionId: capturedSessionId || sessionId || null,
+            exitCode: turnFailed ? 1 : 0,
+            terminalReason,
+            state: hasBackgroundWork ? 'background' : 'idle',
+            backgroundTasks: hasBackgroundWork ? backgroundTasks : []
+          }));
+          // The terminal event already carried this state; record it so the
+          // follow-up publish below is a no-op rather than a duplicate frame.
+          publishedRunState = runStateSignature(
+            hasBackgroundWork ? 'background' : 'idle',
+            hasBackgroundWork ? backgroundTasks : []
+          );
           notifyRunStopped({
             userId: ws?.userId || null,
             provider: 'claude',
@@ -1035,18 +1237,21 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
             sessionName: sessionSummary
           });
         }
-        if (backgroundWorkPending) {
+        if (hasBackgroundWork) {
           // Work started during this turn is still running. Hold the process
           // open so it can finish and report back in a follow-up turn; the
           // ceiling is only a backstop for work that never reports.
           backgroundWorkPending = false;
           heldForBackgroundWork = true;
+          publishRunState('background', backgroundTasks);
           scheduleRelease();
         } else {
           // Either nothing was backgrounded, or the background work just
           // reported in — let the CLI exit now, as it always has.
+          backgroundWorkPending = false;
           heldForBackgroundWork = false;
           releasePromptStream();
+          publishRunState('idle');
         }
       } else if (idleReleaseTimer) {
         // Background activity after the turn — push the countdown back out.
@@ -1134,6 +1339,11 @@ async function queryClaudeSDK(command, options = {}, ws, context) {
       idleReleaseTimer = null;
     }
     releasePromptStream();
+    // Whatever ended this run — success, abort, crash, or the background-work
+    // ceiling — the session is no longer doing anything. Without this a run
+    // held open for background work that never reported back would keep its
+    // indicator (and its tracking row) running forever.
+    publishRunState('idle');
 
     // The sandboxed CLI may have refreshed the OAuth login during the run;
     // bring it back so the host (and the next sandbox) keep a valid token.

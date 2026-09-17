@@ -18,6 +18,7 @@ type RunningSessionApiItem = {
   startedAt?: unknown;
   statusText?: unknown;
   canInterrupt?: unknown;
+  phase?: unknown;
 };
 
 type RunningSessionsApiPayload = {
@@ -103,6 +104,7 @@ export function SessionProtectionProvider({ children }: { children: ReactNode })
               startedAt: parseStartedAt(session.startedAt),
               statusText: typeof session.statusText === 'string' ? session.statusText : undefined,
               canInterrupt: typeof session.canInterrupt === 'boolean' ? session.canInterrupt : undefined,
+              phase: session.phase === 'background' ? ('background' as const) : ('turn' as const),
             };
           })
           .filter((session): session is NonNullable<typeof session> => Boolean(session)),

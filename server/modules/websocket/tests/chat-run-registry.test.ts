@@ -4,9 +4,21 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { closeConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { closeConnection, getConnection, initializeDatabase, sessionsDb } from '@/modules/database/index.js';
+import { projectTrackingService } from '@/modules/project-tracking/index.js';
 import { chatRunRegistry } from '@/modules/websocket/services/chat-run-registry.service.js';
 import { connectedClients } from '@/modules/websocket/services/websocket-state.service.js';
+import { createCompleteMessage } from '@/shared/utils.js';
+
+type TrackingRow = { status: string; error_message: string | null };
+
+const readTrackingRow = (sessionId: string): TrackingRow | undefined =>
+  getConnection()
+    .prepare('SELECT status, error_message FROM project_tracking WHERE session_id = ?')
+    .get(sessionId) as TrackingRow | undefined;
+
+const readTrackingStatus = (sessionId: string): string | undefined => readTrackingRow(sessionId)?.status;
+const readTrackingError = (sessionId: string): string | null | undefined => readTrackingRow(sessionId)?.error_message;
 
 /**
  * Minimal stand-in for a websocket connection: collects every JSON frame the
@@ -309,5 +321,136 @@ test('startRun rejects a second concurrent run for the same session', async () =
       userId: null,
     });
     assert.ok(third);
+  });
+});
+
+test('a turn that leaves background work running keeps the session busy and unsettled', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-9', 'claude', '/workspace/demo');
+    projectTrackingService.add('app-run-9', true);
+
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-9',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    run.writer.send(createCompleteMessage({
+      provider: 'claude',
+      sessionId: 'provider-id-9',
+      exitCode: 0,
+      terminalReason: 'completed',
+      state: 'background',
+      backgroundTasks: [{ id: 'task-1', type: 'shell', status: 'running', description: 'npm test' }],
+    }));
+
+    // The turn is over — the next message may be sent — but the session is not
+    // idle, so the sidebar and the tracking board still show it working.
+    assert.equal(chatRunRegistry.isProcessing('app-run-9'), false);
+    assert.equal(chatRunRegistry.getActivity('app-run-9'), 'background');
+    assert.deepEqual(
+      chatRunRegistry.listRunningRuns().map((session) => [session.sessionId, session.phase, session.canInterrupt]),
+      [['app-run-9', 'background', false]],
+    );
+    assert.equal(readTrackingStatus('app-run-9'), 'running');
+
+    run.writer.send({ kind: 'run_state', provider: 'claude', sessionId: 'provider-id-9', state: 'idle' });
+
+    assert.equal(chatRunRegistry.getActivity('app-run-9'), 'idle');
+    assert.deepEqual(chatRunRegistry.listRunningRuns(), []);
+    assert.equal(readTrackingStatus('app-run-9'), 'done');
+  });
+});
+
+test('an interrupted run is not filed on the tracking board as done', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-10', 'claude', '/workspace/demo');
+    projectTrackingService.add('app-run-10', true);
+
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-10',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    // A successful interrupt reports exit code 0, which on its own is
+    // indistinguishable from a clean finish.
+    chatRunRegistry.completeRun('app-run-10', { exitCode: 0, aborted: true });
+
+    assert.equal(readTrackingStatus('app-run-10'), 'error');
+    assert.equal(readTrackingError('app-run-10'), 'Interrupted before finishing');
+  });
+});
+
+test('a provider terminal reason outranks a zero exit code', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-11', 'claude', '/workspace/demo');
+    projectTrackingService.add('app-run-11', true);
+
+    const connection = new FakeConnection();
+    const run = chatRunRegistry.startRun({
+      appSessionId: 'app-run-11',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(run);
+
+    run.writer.send(createCompleteMessage({
+      provider: 'claude',
+      sessionId: 'provider-id-11',
+      exitCode: 0,
+      terminalReason: 'max_turns',
+    }));
+
+    assert.equal(readTrackingStatus('app-run-11'), 'error');
+    assert.equal(readTrackingError('app-run-11'), 'Stopped early (max_turns)');
+  });
+});
+
+test('trailing run_state from a superseded run cannot clear the run that replaced it', async () => {
+  await withIsolatedDatabase(() => {
+    sessionsDb.createAppSession('app-run-12', 'claude', '/workspace/demo');
+    const connection = new FakeConnection();
+    const first = chatRunRegistry.startRun({
+      appSessionId: 'app-run-12',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(first);
+
+    // The first turn ends holding background work, then the user sends again.
+    first.writer.send(createCompleteMessage({
+      provider: 'claude',
+      sessionId: 'provider-id-12',
+      exitCode: 0,
+      state: 'background',
+      backgroundTasks: [{ id: 'task-2', type: 'monitor', status: 'running', description: 'watching CI' }],
+    }));
+    const second = chatRunRegistry.startRun({
+      appSessionId: 'app-run-12',
+      provider: 'claude',
+      providerSessionId: null,
+      connection,
+      userId: null,
+    });
+    assert.ok(second);
+
+    // The old run's CLI finally winds down and reports idle.
+    first.writer.send({ kind: 'run_state', provider: 'claude', sessionId: 'provider-id-12', state: 'idle' });
+
+    assert.equal(chatRunRegistry.isProcessing('app-run-12'), true);
+    assert.equal(chatRunRegistry.getActivity('app-run-12'), 'running');
   });
 });

@@ -27,6 +27,8 @@ import type {
   ProviderCurrentActiveModel,
   ProviderModelsDefinition,
   ProviderSkillSource,
+  RunActivityState,
+  RunBackgroundTask,
   SubagentActivity,
   WorkspacePathValidationResult,
 } from '@/shared/types.js';
@@ -370,6 +372,9 @@ export function createNormalizedMessage(fields: NormalizedMessageInput): Normali
  *                     is reported as failure
  * - `success`       — exitCode === 0 and not aborted
  * - `aborted`       — run was cancelled by the user
+ * - `terminalReason` — the provider's own word for why the run ended, when it
+ *                      reports one (Claude: `terminal_reason`). Carried so
+ *                      "the user stopped it" is not filed as a clean finish.
  */
 export function createCompleteMessage(opts: {
   provider: NormalizedMessage['provider'];
@@ -377,6 +382,15 @@ export function createCompleteMessage(opts: {
   actualSessionId?: string | null;
   exitCode?: number | null;
   aborted?: boolean;
+  terminalReason?: string | null;
+  /**
+   * What the session is doing now that the turn is over — `background` when
+   * the runtime is still holding work the turn launched. Carried on the
+   * terminal event itself so there is no window in which a session with
+   * outstanding background work reads as finished.
+   */
+  state?: RunActivityState;
+  backgroundTasks?: RunBackgroundTask[];
 }): NormalizedMessage {
   const exitCode = typeof opts.exitCode === 'number' ? opts.exitCode : 1;
   const aborted = Boolean(opts.aborted);
@@ -389,6 +403,60 @@ export function createCompleteMessage(opts: {
     exitCode,
     success: exitCode === 0 && !aborted,
     aborted,
+    ...(opts.terminalReason ? { terminalReason: opts.terminalReason } : {}),
+    ...(opts.state ? { state: opts.state } : {}),
+    ...(opts.backgroundTasks && opts.backgroundTasks.length > 0
+      ? { backgroundTasks: opts.backgroundTasks }
+      : {}),
+    ...(opts.state === 'background'
+      ? { text: describeBackgroundWork(opts.backgroundTasks ?? []) }
+      : {}),
+  });
+}
+
+/**
+ * One-line label for the work a session is still doing after its turn ended.
+ *
+ * Lives here so the live event, the `chat_subscribed` ack and the
+ * running-sessions poll all describe the same session the same way.
+ */
+export function describeBackgroundWork(tasks: readonly RunBackgroundTask[]): string {
+  if (tasks.length === 0) {
+    return 'Finishing background work';
+  }
+
+  const [first] = tasks;
+  const detail = first.description?.trim() || first.type;
+  const extra = tasks.length - 1;
+  return extra > 0
+    ? `Background: ${detail} (+${extra} more)`
+    : `Background: ${detail}`;
+}
+
+/**
+ * Build a `run_state` lifecycle message.
+ *
+ * Unlike `complete`, this is not terminal: it reports what the session is
+ * doing so the activity indicator, the sidebar and the tracking board can stop
+ * inferring it from the message stream. Providers emit it whenever their own
+ * state changes — for Claude that is the CLI's `session_state_changed` system
+ * message plus the background-work snapshot its `Stop` hook reports.
+ */
+export function createRunStateMessage(opts: {
+  provider: NormalizedMessage['provider'];
+  sessionId?: string | null;
+  state: RunActivityState;
+  backgroundTasks?: RunBackgroundTask[];
+}): NormalizedMessage {
+  const backgroundTasks = opts.backgroundTasks ?? [];
+
+  return createNormalizedMessage({
+    kind: 'run_state',
+    provider: opts.provider,
+    sessionId: opts.sessionId || null,
+    state: opts.state,
+    ...(backgroundTasks.length > 0 ? { backgroundTasks } : {}),
+    ...(opts.state === 'background' ? { text: describeBackgroundWork(backgroundTasks) } : {}),
   });
 }
 

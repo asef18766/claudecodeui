@@ -33,6 +33,30 @@ export function createProjectTrackingService() {
       `).run(status, errorMessage, sessionId);
     },
 
+    /**
+     * Clears rows left `running` by a server that went away mid-run.
+     *
+     * Live runs only exist in memory, so nothing on disk can still be running
+     * once the process restarts — but the board is persistent, and a crash (or
+     * an ordinary restart mid-turn) used to leave a row spinning forever with
+     * no run left to finish it.
+     */
+    reconcileInterruptedRuns() {
+      const result = getConnection().prepare(`
+        UPDATE project_tracking
+        SET status = 'error',
+            error_message = 'Interrupted by a server restart',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE status = 'running'
+      `).run();
+
+      if (result.changes > 0) {
+        console.log(`[ProjectTracking] Cleared ${result.changes} tracked run(s) left behind by a restart`);
+      }
+
+      return { cleared: result.changes };
+    },
+
     list() {
       return getConnection().prepare(`
         SELECT

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from 'react';
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 
-import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage } from '@/shared/types';
+import type { ServerEvent,MarkSessionIdle,MarkSessionProcessing,PendingPermissionRequest,ProjectSession,LLMProvider,NormalizedMessage,RunBackgroundTask } from '@/shared/types';
 import { showCompletionTitleIndicator } from '@/modules/chat/utils/pageTitleNotification';
 import { playChatCompletionSound, playNotificationSound } from '@/shared/utils';
 import type { SessionStore } from '@/modules/chat/hooks/useSessionStore';
@@ -12,6 +12,28 @@ const isActionablePermissionRequest = (request: { toolName?: unknown } | null | 
 
 const hasActionablePermissionRequests = (requests: Array<{ toolName?: unknown }> | null | undefined): boolean => {
   return Array.isArray(requests) && requests.some((request) => isActionablePermissionRequest(request));
+};
+
+/**
+ * Status line for the work a finished turn left running.
+ *
+ * The backend already ships a rendered label on the event; this only has to
+ * cover the frames that carry the task list without one (the
+ * `chat_subscribed` ack, which restores state after a refresh).
+ */
+const describeBackgroundTasks = (tasks: unknown, rendered?: unknown): string => {
+  if (typeof rendered === 'string' && rendered) {
+    return rendered;
+  }
+
+  if (!Array.isArray(tasks) || tasks.length === 0) {
+    return 'Finishing background work';
+  }
+
+  const [first] = tasks as RunBackgroundTask[];
+  const detail = first?.description?.trim() || first?.type || 'background task';
+  const extra = tasks.length - 1;
+  return extra > 0 ? `Background: ${detail} (+${extra} more)` : `Background: ${detail}`;
 };
 
 type UseChatRealtimeHandlersArgs = {
@@ -129,7 +151,16 @@ export function useChatRealtimeHandlers({
           if (!sid) return;
 
           if (msg.isProcessing) {
-            onSessionProcessing?.(sid);
+            onSessionProcessing?.(sid, { phase: 'turn' });
+          } else if (msg.activity === 'background') {
+            // The turn is over but the work it started is not. Restoring this
+            // after a refresh is the difference between a session that looks
+            // finished and one that visibly still has work in flight.
+            onSessionProcessing?.(sid, {
+              phase: 'background',
+              statusText: describeBackgroundTasks(msg.backgroundTasks),
+              canInterrupt: false,
+            });
           } else {
             // Idle ack: ignore it if a newer request started after the
             // subscribe was sent — the ack describes the older state.
@@ -224,6 +255,7 @@ export function useChatRealtimeHandlers({
       const shouldPersist =
         msg.kind !== 'complete'
         && msg.kind !== 'status'
+        && msg.kind !== 'run_state'
         && msg.kind !== 'permission_request'
         && msg.kind !== 'permission_resolved'
         && msg.kind !== 'permission_cancelled';
@@ -250,7 +282,19 @@ export function useChatRealtimeHandlers({
           // with exactly one, regardless of success, failure, or abort. The
           // indicator derives from the processing map, so deleting the entry
           // hides it immediately and atomically.
-          onSessionIdle?.(sid);
+          //
+          // Unless the runtime says the turn left work behind: then the session
+          // stays in the map in its `background` phase, which keeps the
+          // indicator and the sidebar honest while freeing the composer.
+          if (msg.state === 'background') {
+            onSessionProcessing?.(sid, {
+              phase: 'background',
+              statusText: describeBackgroundTasks(msg.backgroundTasks, msg.text),
+              canInterrupt: false,
+            });
+          } else {
+            onSessionIdle?.(sid);
+          }
           if (sid === activeViewSessionId) {
             pendingPermissionRequestsRef.current = [];
             setPendingPermissionRequests([]);
@@ -322,6 +366,32 @@ export function useChatRealtimeHandlers({
 
             pendingPermissionRequestsRef.current = nextPendingPermissionRequests;
             setPendingPermissionRequests(nextPendingPermissionRequests);
+          }
+          break;
+        }
+
+        // The provider runtime's own view of what the session is doing. This
+        // is what stops "is it still running?" from being inferred from the
+        // message stream: background work keeps the session marked busy, and
+        // only an explicit idle clears it.
+        case 'run_state': {
+          if (!sid) break;
+
+          if (msg.state === 'idle') {
+            onSessionIdle?.(sid);
+          } else if (msg.state === 'background') {
+            onSessionProcessing?.(sid, {
+              phase: 'background',
+              statusText: describeBackgroundTasks(msg.backgroundTasks, msg.text),
+              canInterrupt: false,
+            });
+          } else {
+            onSessionProcessing?.(sid, {
+              phase: 'turn',
+              ...(msg.state === 'requires_action'
+                ? { statusText: 'Waiting for you', canInterrupt: true }
+                : {}),
+            });
           }
           break;
         }

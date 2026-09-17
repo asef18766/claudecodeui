@@ -125,17 +125,15 @@ export const sessionsService = {
   },
 
   /**
-   * Returns app-facing ids for provider runs that are currently processing.
+   * Returns app-facing ids for provider runs that are still doing something.
    *
    * This is intentionally status-only: callers that only need sidebar activity
    * indicators should not attach to chat streams or request replayed messages.
+   * `phase` separates a live turn from background work a finished turn left
+   * behind, so the chat composer stays usable during the latter while the
+   * session still reads as busy everywhere else.
    */
-  listRunningSessions(): Array<{
-    sessionId: string;
-    provider: LLMProvider;
-    startedAt: number;
-    lastSeq: number;
-  }> {
+  listRunningSessions(): ReturnType<typeof chatRunRegistry.listRunningRuns> {
     return chatRunRegistry.listRunningRuns();
   },
 

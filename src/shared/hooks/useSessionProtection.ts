@@ -22,6 +22,7 @@ const sessionActivityMapsMatch = (
       || leftActivity.statusText !== rightActivity.statusText
       || leftActivity.canInterrupt !== rightActivity.canInterrupt
       || leftActivity.startedAt !== rightActivity.startedAt
+      || leftActivity.phase !== rightActivity.phase
     ) {
       return false;
     }
@@ -57,12 +58,14 @@ export function useSessionProtection() {
           activity?.statusText !== undefined ? activity.statusText : existing?.statusText ?? null,
         canInterrupt: activity?.canInterrupt ?? existing?.canInterrupt ?? true,
         startedAt: existing?.startedAt ?? Date.now(),
+        phase: activity?.phase ?? existing?.phase ?? 'turn',
       };
 
       if (
         existing
         && existing.statusText === next.statusText
         && existing.canInterrupt === next.canInterrupt
+        && existing.phase === next.phase
       ) {
         return prev;
       }
@@ -123,6 +126,7 @@ export function useSessionProtection() {
             snapshot.statusText !== undefined ? snapshot.statusText : existing?.statusText ?? null,
           canInterrupt: snapshot.canInterrupt ?? existing?.canInterrupt ?? true,
           startedAt: snapshotStartedAt ?? existing?.startedAt ?? now,
+          phase: snapshot.phase ?? existing?.phase ?? 'turn',
         });
       }
 
