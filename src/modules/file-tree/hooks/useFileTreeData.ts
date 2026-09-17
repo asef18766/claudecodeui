@@ -27,7 +27,10 @@ function readResponseErrorMessage(responseBody: string): string | null {
   }
 }
 
-export function useFileTreeData(selectedProject: Project | null): UseFileTreeDataResult {
+export function useFileTreeData(
+  selectedProject: Project | null,
+  respectGitignore: boolean,
+): UseFileTreeDataResult {
   const [files, setFiles] = useState<FileTreeNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,7 +68,10 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
         setError(null);
       }
       try {
-        const response = await api.getFiles(projectId, { signal: abortControllerRef.current!.signal });
+        const response = await api.getFiles(projectId, {
+          respectGitignore,
+          signal: abortControllerRef.current!.signal,
+        });
 
         if (!response.ok) {
           const errorText = await response.text();
@@ -104,7 +110,9 @@ export function useFileTreeData(selectedProject: Project | null): UseFileTreeDat
       isActive = false;
       abortControllerRef.current?.abort();
     };
-  }, [selectedProject?.projectId, refreshKey]);
+    // Toggling the gitignore filter re-runs the effect, which aborts the
+    // in-flight request before issuing the one for the newly chosen filter.
+  }, [selectedProject?.projectId, respectGitignore, refreshKey]);
 
   return {
     files,

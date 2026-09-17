@@ -121,6 +121,8 @@
     "newFolder": "新規フォルダ (Cmd+Shift+N)",
     "refresh": "更新",
     "collapseAll": "すべて折りたたむ",
+    "showIgnoredFiles": ".gitignore で無視されたファイルを表示",
+    "hideIgnoredFiles": ".gitignore で無視されたファイルを非表示",
     "context": {
       "rename": "名前を変更",
       "delete": "削除",

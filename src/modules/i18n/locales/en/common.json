@@ -123,6 +123,8 @@
     "newFolder": "New Folder (Cmd+Shift+N)",
     "refresh": "Refresh",
     "collapseAll": "Collapse All",
+    "showIgnoredFiles": "Show files ignored by .gitignore",
+    "hideIgnoredFiles": "Hide files ignored by .gitignore",
     "context": {
       "rename": "Rename",
       "delete": "Delete",

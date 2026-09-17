@@ -121,6 +121,8 @@
     "newFolder": "Новая папка (Cmd+Shift+N)",
     "refresh": "Обновить",
     "collapseAll": "Свернуть все",
+    "showIgnoredFiles": "Показать файлы, игнорируемые .gitignore",
+    "hideIgnoredFiles": "Скрыть файлы, игнорируемые .gitignore",
     "context": {
       "rename": "Переименовать",
       "delete": "Удалить",

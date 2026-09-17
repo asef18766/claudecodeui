@@ -262,8 +262,15 @@ export const api = {
     get(fileContentPath(projectId, filePath), options),
   saveFile: (projectId: string, filePath: string, content: string) =>
     put(`/api/file-tree/projects/${projectId}/file`, { filePath, content }),
-  getFiles: (projectId: string, options: ApiRequestOptions = {}) =>
-    get(`/api/file-tree/projects/${projectId}/files${query({ respectGitignore: true })}`, options),
+  // `respectGitignore` defaults to on so @-mentions, the command palette and the
+  // tree all hide build output by default; the Files toolbar passes false when
+  // the user asks to see ignored paths. `query` drops false, and the route reads
+  // an absent param as false, so the off case sends no parameter at all.
+  getFiles: (
+    projectId: string,
+    { respectGitignore = true, ...options }: ApiRequestOptions & { respectGitignore?: boolean } = {},
+  ) =>
+    get(`/api/file-tree/projects/${projectId}/files${query({ respectGitignore })}`, options),
 
   // File operations
   createFile: (

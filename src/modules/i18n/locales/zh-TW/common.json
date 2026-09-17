@@ -122,6 +122,8 @@
     "newFolder": "新增資料夾 (Cmd+Shift+N)",
     "refresh": "重新整理",
     "collapseAll": "全部收合",
+    "showIgnoredFiles": "顯示被 .gitignore 忽略的檔案",
+    "hideIgnoredFiles": "隱藏被 .gitignore 忽略的檔案",
     "context": {
       "rename": "重新命名",
       "delete": "刪除",

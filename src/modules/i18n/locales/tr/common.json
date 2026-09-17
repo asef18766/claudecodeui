@@ -121,6 +121,8 @@
     "newFolder": "Yeni Klasör (Cmd+Shift+N)",
     "refresh": "Yenile",
     "collapseAll": "Tümünü Daralt",
+    "showIgnoredFiles": ".gitignore tarafından yok sayılan dosyaları göster",
+    "hideIgnoredFiles": ".gitignore tarafından yok sayılan dosyaları gizle",
     "context": {
       "rename": "Yeniden Adlandır",
       "delete": "Sil",

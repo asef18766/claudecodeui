@@ -121,6 +121,8 @@
     "newFolder": "Carpeta nueva (Cmd+Shift+N)",
     "refresh": "Actualizar",
     "collapseAll": "Contraer todo",
+    "showIgnoredFiles": "Mostrar archivos ignorados por .gitignore",
+    "hideIgnoredFiles": "Ocultar archivos ignorados por .gitignore",
     "context": {
       "rename": "Renombrar",
       "delete": "Eliminar",
