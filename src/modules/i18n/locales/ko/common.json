@@ -121,6 +121,8 @@
     "newFolder": "새 폴더 (Cmd+Shift+N)",
     "refresh": "새로고침",
     "collapseAll": "모두 접기",
+    "showIgnoredFiles": ".gitignore에서 무시된 파일 표시",
+    "hideIgnoredFiles": ".gitignore에서 무시된 파일 숨기기",
     "context": {
       "rename": "이름 변경",
       "delete": "삭제",

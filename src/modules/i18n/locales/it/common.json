@@ -121,6 +121,8 @@
     "newFolder": "Nuova cartella (Cmd+Shift+N)",
     "refresh": "Aggiorna",
     "collapseAll": "Comprimi tutto",
+    "showIgnoredFiles": "Mostra i file ignorati da .gitignore",
+    "hideIgnoredFiles": "Nascondi i file ignorati da .gitignore",
     "context": {
       "rename": "Rinomina",
       "delete": "Elimina",

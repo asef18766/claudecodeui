@@ -469,6 +469,18 @@ export function createFileTreeService(dependencies: FileTreeServiceDependencies)
             dependencies.logger.error(`Error reading .gitignore in "${projectRoot}"`, error);
           }
         }
+        // No `.gitignore` to honour: `buildFileTree`'s conventional-name
+        // default keeps the usual build output out of the tree.
+      } else {
+        // Asked to show ignored paths, so show them. The conventional-name
+        // default would still hide `dist`, `build`, `venv`, `__pycache__` and
+        // the rest of that list, which reads as a bug the moment a project
+        // ignores two build directories and only one of them appears.
+        //
+        // The hard exclusions stay: `node_modules` and `.git` are big enough
+        // to spend the whole entry budget and fail the listing outright, so
+        // they are never worth revealing.
+        includeEntry = includeEntryByHardExclusions;
       }
 
       return buildFileTree(projectRoot, 10, 0, includeEntry);

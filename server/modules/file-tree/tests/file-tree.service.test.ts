@@ -197,6 +197,51 @@ test('listProjectFiles excludes gitignored entries only when requested', async (
   assert.equal(readDirectories.includes(cacheDirectory), false);
 });
 
+test('listProjectFiles shows every ignored path except the hard exclusions when filtering is off', async () => {
+  const projectRoot = path.resolve('file-tree-test-project');
+  const distributionDirectory = path.join(projectRoot, 'dist');
+  const serverDistributionDirectory = path.join(projectRoot, 'dist-server');
+  const nodeModulesDirectory = path.join(projectRoot, 'node_modules');
+  const readDirectories: string[] = [];
+  const fileSystem = createFakeFileSystem({
+    access: async () => undefined,
+    readTextFile: async () => ['dist/', 'dist-server/', 'node_modules/'].join('\n'),
+    openDirectory: createDirectoryReader((directoryPath) => {
+      readDirectories.push(directoryPath);
+      if (directoryPath === projectRoot) {
+        return [
+          createDirectoryEntry('dist', true),
+          createDirectoryEntry('dist-server', true),
+          createDirectoryEntry('node_modules', true),
+          createDirectoryEntry('README.md', false),
+        ];
+      }
+      if (directoryPath === distributionDirectory) {
+        return [createDirectoryEntry('bundle.js', false)];
+      }
+      if (directoryPath === serverDistributionDirectory) {
+        return [createDirectoryEntry('index.js', false)];
+      }
+      return [];
+    }),
+    lstat: async (candidatePath) => createStats(
+      candidatePath === distributionDirectory
+        || candidatePath === serverDistributionDirectory
+        || candidatePath === nodeModulesDirectory,
+      0o644,
+    ),
+  });
+  const service = createFileTreeService(createDependencies(fileSystem, projectRoot));
+
+  const tree = await service.listProjectFiles('project-1', { respectGitignore: false });
+
+  // `dist` and `dist-server` are ignored the same way, so they appear together
+  // rather than one being kept back by the conventional-name list.
+  assert.deepEqual(tree.map((entry) => entry.name), ['dist', 'dist-server', 'README.md']);
+  assert.deepEqual(tree[0]?.children?.map((entry) => entry.name), ['bundle.js']);
+  assert.equal(readDirectories.includes(nodeModulesDirectory), false);
+});
+
 test('listProjectFiles falls back to conventional directory names when no gitignore exists', async () => {
   const projectRoot = path.resolve('file-tree-test-project');
   const documentationDirectory = path.join(projectRoot, 'docs');

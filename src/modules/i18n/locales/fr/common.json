@@ -121,6 +121,8 @@
     "newFolder": "Nouveau dossier (Cmd+Maj+N)",
     "refresh": "Actualiser",
     "collapseAll": "Tout réduire",
+    "showIgnoredFiles": "Afficher les fichiers ignorés par .gitignore",
+    "hideIgnoredFiles": "Masquer les fichiers ignorés par .gitignore",
     "context": {
       "rename": "Renommer",
       "delete": "Supprimer",

@@ -1,6 +1,6 @@
 import { useRef } from 'react';
 import type { ChangeEvent } from 'react';
-import { ChevronDown, Eye, FileText, FolderPlus, List, Loader2, RefreshCw, Search, TableProperties, Upload, X } from 'lucide-react';
+import { ChevronDown, Eye, FileText, Filter, FilterX, FolderPlus, List, Loader2, RefreshCw, Search, TableProperties, Upload, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button, Input } from '@/shared/ui';
@@ -19,6 +19,9 @@ type FileTreeHeaderProps = {
   onUploadFiles?: (files: FileList) => void;
   onRefresh?: () => void;
   onCollapseAll?: () => void;
+  // Gitignore filter
+  respectGitignore: boolean;
+  onRespectGitignoreChange: (respectGitignore: boolean) => void;
   // Loading state
   loading?: boolean;
   operationLoading?: boolean;
@@ -37,6 +40,8 @@ export default function FileTreeHeader({
   onUploadFiles,
   onRefresh,
   onCollapseAll,
+  respectGitignore,
+  onRespectGitignoreChange,
   loading,
   operationLoading,
   isUploading,
@@ -155,6 +160,29 @@ export default function FileTreeHeader({
               <ChevronDown className="h-3.5 w-3.5" />
             </Button>
           )}
+          {/* Gitignore filter toggle. Highlighted while off, because a tree
+              that includes ignored paths is the non-default view and explains
+              entries the agent's own listing would not show. */}
+          <Button
+            variant={respectGitignore ? 'ghost' : 'default'}
+            size="sm"
+            className="h-7 w-7 p-0"
+            onClick={() => onRespectGitignoreChange(!respectGitignore)}
+            aria-pressed={!respectGitignore}
+            title={respectGitignore
+              ? t('fileTree.showIgnoredFiles', 'Show files ignored by .gitignore')
+              : t('fileTree.hideIgnoredFiles', 'Hide files ignored by .gitignore')}
+            aria-label={respectGitignore
+              ? t('fileTree.showIgnoredFiles', 'Show files ignored by .gitignore')
+              : t('fileTree.hideIgnoredFiles', 'Hide files ignored by .gitignore')}
+            disabled={operationLoading}
+          >
+            {respectGitignore ? (
+              <Filter className="h-3.5 w-3.5" />
+            ) : (
+              <FilterX className="h-3.5 w-3.5" />
+            )}
+          </Button>
           {/* Divider */}
           <div className="mx-0.5 h-4 w-px bg-border" />
           {/* View mode buttons */}
