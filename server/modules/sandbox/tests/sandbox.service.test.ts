@@ -22,6 +22,8 @@ function createHarness(
   homeDirectory = '/home/host',
   scratchDirectory = '/tmp/cloudcli-sandbox-test-scratch',
   respondDocker: (argumentsList: string[]) => FakeSbxResponse = () => ({ exitCode: 1, stderr: 'docker: not stubbed' }),
+  /** Most cases describe a normal project directory; the workspace checks override it. */
+  workspaceKind: 'directory' | 'file' | 'missing' = 'directory',
 ) {
   const calls: RecordedCall[] = [];
   const dockerCalls: string[][] = [];
@@ -45,6 +47,7 @@ function createHarness(
         stderr: response.stderr ?? '',
       };
     },
+    readWorkspaceKind: async () => workspaceKind,
     runDocker: async (argumentsList) => {
       dockerCalls.push(argumentsList);
       const response = respondDocker(argumentsList);
@@ -732,5 +735,78 @@ test('a codex-flavored image is refused for a claude run', async () => {
   await assert.rejects(
     harness.service.prepareClaudeRun({ cwd: '/work/app', providerSessionId: null, template: 'docker.io/acme/codexbase:1' }),
     /cannot run claude/,
+  );
+});
+
+// ----- sbx name rules
+
+test('a workspace name sbx would reject is sanitised into a usable sandbox name', async () => {
+  // Regression: `\w` allows underscores, so `medusa_auto_anal` used to reach
+  // sbx verbatim and fail with "sandbox name cannot contain underscores".
+  const cases = [
+    '/home/asef18766/medusa_auto_anal',
+    '/work/My App',
+    '/work/.hidden',
+    '/work/ünïcode™',
+    `/work/${'x'.repeat(120)}`,
+  ];
+  // sbx: must start alphanumeric, then letters/digits/dots/hyphens, max 63.
+  const sbxRule = /^[a-zA-Z0-9][a-zA-Z0-9.-]+$/;
+
+  for (const cwd of cases) {
+    const harness = createHarness((argumentsList) => (
+      argumentsList[0] === 'ls' ? { stdout: sandboxList([]) } : {}
+    ));
+    const run = await harness.service.prepareClaudeRun({ cwd, providerSessionId: null });
+
+    assert.match(run.sandboxName, sbxRule, `${cwd} produced an invalid name: ${run.sandboxName}`);
+    assert.ok(!run.sandboxName.includes('_'), `${cwd} left an underscore in: ${run.sandboxName}`);
+    assert.ok(run.sandboxName.length <= 63, `${cwd} produced a ${run.sandboxName.length} character name`);
+  }
+});
+
+test('long workspace names keep their digest so they cannot collide', async () => {
+  const names = new Set<string>();
+  for (const suffix of ['one', 'two']) {
+    const harness = createHarness((argumentsList) => (
+      argumentsList[0] === 'ls' ? { stdout: sandboxList([]) } : {}
+    ));
+    const run = await harness.service.prepareClaudeRun({
+      cwd: `/work/${'project_directory_with_a_very_long_name'}-${suffix}`,
+      providerSessionId: null,
+    });
+    names.add(run.sandboxName);
+  }
+  assert.equal(names.size, 2, 'truncation must not merge two different workspaces');
+});
+
+test('a missing project directory is reported plainly instead of sbx cancelling itself', async () => {
+  const harness = createHarness(
+    (argumentsList) => (argumentsList[0] === 'ls' ? { stdout: sandboxList([]) } : {}),
+    '/home/host',
+    '/tmp/cloudcli-sandbox-test-scratch',
+    undefined,
+    'missing',
+  );
+
+  await assert.rejects(
+    harness.service.prepareClaudeRun({ cwd: '/home/asef18766/medusa_auto_anal', providerSessionId: null }),
+    /does not exist, so no sandbox can be mounted/,
+  );
+  assert.equal(harness.calls.some((call) => call.argumentsList[0] === 'create'), false);
+});
+
+test('a project path that is a file rather than a directory is refused', async () => {
+  const harness = createHarness(
+    (argumentsList) => (argumentsList[0] === 'ls' ? { stdout: sandboxList([]) } : {}),
+    '/home/host',
+    '/tmp/cloudcli-sandbox-test-scratch',
+    undefined,
+    'file',
+  );
+
+  await assert.rejects(
+    harness.service.prepareClaudeRun({ cwd: '/work/notes.txt', providerSessionId: null }),
+    /is not a directory/,
   );
 });

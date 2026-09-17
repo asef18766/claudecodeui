@@ -75,13 +75,18 @@ afterEach(() => {
   localStorage.clear();
 });
 
-const renderPreference = async (available: boolean, session: ProjectSession | null = SESSION) => {
+const renderPreference = async (
+  available: boolean,
+  session: ProjectSession | null = SESSION,
+  provider = 'claude',
+) => {
   stubFetch(available);
   const { useSandboxPreference: useFreshSandboxPreference } = await import('@/modules/chat/hooks/useSandboxPreference');
   const view = renderHook(() => useFreshSandboxPreference({
     selectedProject: PROJECT,
     selectedSession: session,
     supported: true,
+    provider,
   }));
   await waitFor(() => assert.equal(view.result.current.sandboxChecking, false));
   return view;
@@ -95,8 +100,8 @@ test('picking a template remembers the choice for the session and the project', 
 
   assert.equal(view.result.current.sandboxEnabled, true);
   assert.equal(view.result.current.sandboxTemplate, 'docker.io/acme/custom:v2');
-  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-session-1') ?? ''), { enabled: true, template: 'docker.io/acme/custom:v2' });
-  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-last-/tmp/project-one') ?? ''), { enabled: true, template: 'docker.io/acme/custom:v2' });
+  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-session-1') ?? ''), { enabled: true, template: 'docker.io/acme/custom:v2', provider: 'claude' });
+  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-last-/tmp/project-one') ?? ''), { enabled: true, template: 'docker.io/acme/custom:v2', provider: 'claude' });
 
   act(() => view.result.current.selectSandboxTemplate(null));
   assert.equal(view.result.current.sandboxEnabled, true);
@@ -104,7 +109,24 @@ test('picking a template remembers the choice for the session and the project', 
 
   act(() => view.result.current.disableSandbox());
   assert.equal(view.result.current.sandboxEnabled, false);
-  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-session-1') ?? ''), { enabled: false, template: null });
+  assert.deepEqual(JSON.parse(localStorage.getItem('sandbox-session-1') ?? ''), { enabled: false, template: null, provider: null });
+});
+
+test('a template picked for one agent is dropped when another agent takes over, leaving the default image', async () => {
+  const claude = await renderPreference(true);
+  act(() => claude.result.current.selectSandboxTemplate('docker.io/acme/custom:v2'));
+  assert.equal(claude.result.current.sandboxTemplate, 'docker.io/acme/custom:v2');
+
+  // A claude-flavored image carries no codex kit, so the server would refuse
+  // the run; the switch stays on and falls back to codex's own sbx image.
+  const codex = await renderPreference(true, SESSION, 'codex');
+  assert.equal(codex.result.current.sandboxRequested, true);
+  assert.equal(codex.result.current.sandboxEnabled, true);
+  assert.equal(codex.result.current.sandboxTemplate, null);
+
+  // Switching back finds the claude choice still recorded.
+  const back = await renderPreference(true);
+  assert.equal(back.result.current.sandboxTemplate, 'docker.io/acme/custom:v2');
 });
 
 test('Docker images load on demand and an already-imported image is selected without an import round trip', async () => {

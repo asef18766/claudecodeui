@@ -31,18 +31,25 @@ type UseSandboxPreferenceArgs = {
   selectedSession: ProjectSession | null;
   /** From the provider capability matrix; the menu is hidden otherwise. */
   supported: boolean;
+  /** Provider the next turn runs under; template images are agent-specific. */
+  provider: string;
 };
 
 /**
  * What the user picked for a session/project: off, or on with an optional
  * template image (null template = the agent's built-in sbx image).
+ *
+ * `provider` records which agent the template was picked for. A template image
+ * only carries one agent's kit, so it is dropped when the composer switches to
+ * another provider.
  */
 type SandboxChoice = {
   enabled: boolean;
   template: string | null;
+  provider: string | null;
 };
 
-const OFF_CHOICE: SandboxChoice = { enabled: false, template: null };
+const OFF_CHOICE: SandboxChoice = { enabled: false, template: null, provider: null };
 
 const sessionStorageKey = (sessionId: string) => `sandbox-${sessionId}`;
 const projectStorageKey = (projectPath: string) => `sandbox-last-${projectPath}`;
@@ -50,19 +57,27 @@ const projectStorageKey = (projectPath: string) => `sandbox-last-${projectPath}`
 /**
  * Stored choices predate templates and were the bare strings "true"/"false";
  * they still read as on/off with the default image.
+ *
+ * A template remembered for another agent is dropped rather than replayed: the
+ * image carries one agent's kit, so reusing it would fail the server's flavor
+ * check. The switch itself survives, falling back to the default image.
  */
-function parseStoredChoice(raw: string | null): SandboxChoice | null {
+function parseStoredChoice(raw: string | null, provider: string): SandboxChoice | null {
   if (raw === null) {
     return null;
   }
   if (raw === 'true' || raw === 'false') {
-    return { enabled: raw === 'true', template: null };
+    return { enabled: raw === 'true', template: null, provider: null };
   }
   try {
     const parsed = JSON.parse(raw) as Partial<SandboxChoice>;
+    const template = typeof parsed.template === 'string' && parsed.template ? parsed.template : null;
+    const storedProvider = typeof parsed.provider === 'string' && parsed.provider ? parsed.provider : null;
+    const keepsTemplate = template !== null && storedProvider === provider;
     return {
       enabled: Boolean(parsed.enabled),
-      template: typeof parsed.template === 'string' && parsed.template ? parsed.template : null,
+      template: keepsTemplate ? template : null,
+      provider: keepsTemplate ? storedProvider : null,
     };
   } catch {
     return null;
@@ -111,7 +126,12 @@ const loadAvailability = (): Promise<SandboxAvailability> => {
  * there, so it should stay sandboxed when reopened. Used by chat's
  * ChatInterface to drive the composer menu and the `sandbox` send options.
  */
-export function useSandboxPreference({ selectedProject, selectedSession, supported }: UseSandboxPreferenceArgs) {
+export function useSandboxPreference({
+  selectedProject,
+  selectedSession,
+  supported,
+  provider,
+}: UseSandboxPreferenceArgs) {
   // Server-side probe result; null while the request is in flight so the
   // menu can show a neutral "checking" state instead of flashing disabled.
   const [availability, setAvailability] = useState<SandboxAvailability | null>(null);
@@ -149,10 +169,14 @@ export function useSandboxPreference({ selectedProject, selectedSession, support
   const sessionId = selectedSession?.id ?? null;
 
   useEffect(() => {
-    const sessionSaved = sessionId ? parseStoredChoice(localStorage.getItem(sessionStorageKey(sessionId))) : null;
-    const projectSaved = projectPath ? parseStoredChoice(localStorage.getItem(projectStorageKey(projectPath))) : null;
+    const sessionSaved = sessionId
+      ? parseStoredChoice(localStorage.getItem(sessionStorageKey(sessionId)), provider)
+      : null;
+    const projectSaved = projectPath
+      ? parseStoredChoice(localStorage.getItem(projectStorageKey(projectPath)), provider)
+      : null;
     setChoice(sessionSaved ?? projectSaved ?? OFF_CHOICE);
-  }, [sessionId, projectPath]);
+  }, [sessionId, projectPath, provider]);
 
   const persistChoice = useCallback((next: SandboxChoice) => {
     setChoice(next);
@@ -167,8 +191,8 @@ export function useSandboxPreference({ selectedProject, selectedSession, support
 
   /** Turns the sandbox on for the next turn, from the given template (null = default image). */
   const selectSandboxTemplate = useCallback((template: string | null) => {
-    persistChoice({ enabled: true, template });
-  }, [persistChoice]);
+    persistChoice({ enabled: true, template, provider: template ? provider : null });
+  }, [persistChoice, provider]);
 
   const disableSandbox = useCallback(() => {
     persistChoice(OFF_CHOICE);
@@ -201,7 +225,7 @@ export function useSandboxPreference({ selectedProject, selectedSession, support
    */
   const selectSandboxImage = useCallback(async (image: SandboxImageOption) => {
     if (image.templateReference) {
-      persistChoice({ enabled: true, template: image.templateReference });
+      persistChoice({ enabled: true, template: image.templateReference, provider });
       return;
     }
     if (importingImage) {
@@ -219,13 +243,13 @@ export function useSandboxPreference({ selectedProject, selectedSession, support
       setImages((current) => current?.map((candidate) => (
         candidate.reference === image.reference ? { ...candidate, templateReference } : candidate
       )) ?? current);
-      persistChoice({ enabled: true, template: templateReference });
+      persistChoice({ enabled: true, template: templateReference, provider });
     } catch (error) {
       setImportError(error instanceof Error ? error.message : 'Import failed');
     } finally {
       setImportingImage(null);
     }
-  }, [importingImage, persistChoice]);
+  }, [importingImage, persistChoice, provider]);
 
   const sandboxAvailable = availability?.available ?? false;
 
