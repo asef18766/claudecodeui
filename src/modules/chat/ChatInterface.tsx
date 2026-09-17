@@ -145,6 +145,7 @@ function ChatInterface({
     selectedProject,
     selectedSession,
     supported: supportsSandbox,
+    provider,
   });
 
   const {

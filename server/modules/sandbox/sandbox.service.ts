@@ -93,6 +93,11 @@ type WorkspaceSandboxServiceDependencies = {
   runSbx(argumentsList: string[], stdin?: string): Promise<SbxCommandResult>;
   /** Runs the `docker` CLI with the same contract as `runSbx`. */
   runDocker(argumentsList: string[]): Promise<SbxCommandResult>;
+  /**
+   * Classifies a workspace path. Injected so focused tests can describe a
+   * workspace without creating one on disk.
+   */
+  readWorkspaceKind(directoryPath: string): Promise<'directory' | 'file' | 'missing'>;
   /** Starts a long-lived `sbx` process whose stdio the caller owns (the agent CLI). */
   spawnSbx(argumentsList: string[]): ChildProcess;
   homeDirectory: string;
@@ -169,8 +174,25 @@ const STATUS_CACHE_TTL_MS = 30_000;
  */
 const FORWARDED_ENV_PATTERN = /^(CLAUDE_CODE_|CLAUDE_AGENT_SDK)/;
 
-/** Same rule `sbx` applies to `--name`. */
-const SANDBOX_NAME_PATTERN = /^[\w-]+$/;
+/**
+ * Exactly the rule `sbx` applies to `--name`: it must start alphanumeric and
+ * may then hold letters, digits, dots and hyphens. Underscores are rejected
+ * outright by `sbx`, so they must never reach it — note `\w` would allow
+ * them, which is how a workspace like `medusa_auto_anal` once produced an
+ * unusable name.
+ */
+const SANDBOX_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9.-]+$/;
+
+/** Characters allowed in the workspace-derived part of a sandbox name. */
+const SANDBOX_NAME_SAFE_CHARACTERS = /[^a-zA-Z0-9-]+/g;
+
+/**
+ * Longest workspace-derived segment that still leaves room for the
+ * `cloudcli-<agent>-` prefix and the `-<digest>` suffix inside sbx's 63
+ * character limit. Capping this rather than truncating the whole name keeps
+ * the digest intact, so two long workspace paths cannot collide.
+ */
+const SANDBOX_NAME_BASE_LIMIT = 38;
 
 /**
  * True when an image flavor can host this agent's kit. Flavors are named
@@ -204,9 +226,12 @@ function encodeClaudeProjectDirectory(cwd: string): string {
  * separate sandbox instead of silently reusing one built from another image.
  */
 function deriveSandboxName(agent: SandboxAgent, cwd: string, template: string | null): string {
-  const baseName = path.basename(cwd).replace(/[^\w-]+/g, '-').replace(/^-+|-+$/g, '') || 'workspace';
+  const baseName = path.basename(cwd)
+    .replace(SANDBOX_NAME_SAFE_CHARACTERS, '-')
+    .slice(0, SANDBOX_NAME_BASE_LIMIT)
+    .replace(/^-+|-+$/g, '') || 'workspace';
   const digest = crypto.createHash('sha1').update(template ? `${cwd}\n${template}` : cwd).digest('hex').slice(0, 8);
-  return `cloudcli-${agent}-${baseName}-${digest}`.slice(0, 63);
+  return `cloudcli-${agent}-${baseName}-${digest}`;
 }
 
 /** Single-quotes a value for a POSIX shell line run inside the sandbox. */
@@ -531,6 +556,17 @@ export function createWorkspaceSandboxService(dependencies: WorkspaceSandboxServ
       throw new Error(`Invalid sandbox template reference: ${template}`);
     }
 
+    // `sbx create` offers to create a missing workspace interactively; with no
+    // terminal that turns into a bare "user cancelled operation". Say what is
+    // actually wrong, and never create a directory the user did not ask for.
+    const workspaceKind = await dependencies.readWorkspaceKind(cwd);
+    if (workspaceKind === 'missing') {
+      throw new Error(`The project directory ${cwd} does not exist, so no sandbox can be mounted on it.`);
+    }
+    if (workspaceKind === 'file') {
+      throw new Error(`The project path ${cwd} is not a directory, so no sandbox can be mounted on it.`);
+    }
+
     if (template !== null) {
       // `sbx create` fails with a bare "failed to apply kit to sandbox" when
       // the image cannot host the agent, which says nothing about the cause.
@@ -548,8 +584,10 @@ export function createWorkspaceSandboxService(dependencies: WorkspaceSandboxServ
     }
 
     const sandboxName = deriveSandboxName(agent, cwd, template);
+    // Belt and braces: the derivation above already sanitises, so a failure
+    // here is a bug in it rather than something the user can fix.
     if (!SANDBOX_NAME_PATTERN.test(sandboxName)) {
-      throw new Error(`Derived sandbox name is invalid: ${sandboxName}`);
+      throw new Error(`Derived sandbox name is invalid for sbx: ${sandboxName}`);
     }
 
     const sandboxes = await listSandboxes();
@@ -932,6 +970,13 @@ function runCliCommand(command: string, argumentsList: string[], stdin?: string)
 export const workspaceSandboxService = createWorkspaceSandboxService({
   runSbx: (argumentsList, stdin) => runCliCommand('sbx', argumentsList, stdin),
   runDocker: (argumentsList) => runCliCommand('docker', argumentsList),
+  readWorkspaceKind: async (directoryPath) => {
+    try {
+      return (await fs.stat(directoryPath)).isDirectory() ? 'directory' : 'file';
+    } catch {
+      return 'missing';
+    }
+  },
   spawnSbx: (argumentsList) => spawnChildProcess('sbx', argumentsList, { stdio: ['pipe', 'pipe', 'pipe'] }),
   homeDirectory: os.homedir(),
   scratchDirectory: path.join(os.tmpdir(), 'cloudcli-sandbox'),
